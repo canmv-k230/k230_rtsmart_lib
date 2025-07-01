@@ -24,7 +24,7 @@ CFILES += $(wildcard $(LOCAL_SRC_DIR)/mqttclient/*.c)
 CFILES += $(wildcard $(LOCAL_SRC_DIR)/network/*.c)
 CFILES += $(wildcard $(LOCAL_SRC_DIR)/platform/$(MQTT_PLATFORM)/*.c)
 
-CFLAGS += -I./include
+CFLAGS += -I$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/mqttclient/
 
 ifeq ($(CONFIG_MQTT_NETWORK_ENABLE_TYPE_TLS), y)
 	CFILES += $(wildcard $(LOCAL_SRC_DIR)/network/mbedtls/library/*.c)
@@ -105,6 +105,7 @@ ifeq ($(CONFIG_MQTT_NETWORK_ENABLE_TYPE_TLS), y)
 endif
 
 	@cp -rp ./include/* $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/mqttclient/
+	@rm -r ./include/
 
 
 ELF_OUTPUT_DIR := $(RTSMART_LIBS_ELF_INSTALL_PATH)
@@ -113,7 +114,7 @@ MQTT_EXAMPLE_CFLAGS := -march=rv64imafdcv -mabi=lp64d -mcmodel=medany
 MQTT_EXAMPLE_CFLAGS += -std=gnu99 -fdata-sections -ffunction-sections
 MQTT_EXAMPLE_CFLAGS += -T ./link.lds --static -Wl,--gc-sections
 
-MQTT_EXAMPLE_CFLAGS += -I./include
+MQTT_EXAMPLE_CFLAGS += -I$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/mqttclient/
 
 MQTT_EXAMPLE_CFLAGS += -I$(SDK_SRC_ROOT_DIR)/include/generated
 MQTT_EXAMPLE_CFLAGS += $(LIB_CFLAGS)
