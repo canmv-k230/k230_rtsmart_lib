@@ -6,7 +6,7 @@ subdirs-y :=
 
 subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_FREETYPE) += freetype
 subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS) += mbedtls
-subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS) += mqttclient
+subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_MQTTCLIENT) += mqttclient
 
 .PHONY: all clean distclean
 
