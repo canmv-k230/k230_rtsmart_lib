@@ -3,3 +3,4 @@ k230_bin
 *.o
 *.o.d
 test_*.elf
+3rd-party/mqttclient/include/*.h
