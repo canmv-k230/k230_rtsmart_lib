@@ -1,0 +1,4 @@
+
+menuconfig MQTT_LOG_IS_SALOF
+    bool "Enable MQTTClient SALOF support"
+    default n

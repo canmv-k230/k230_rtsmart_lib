@@ -16,4 +16,12 @@ menu "RT-Smart 3rd-party Configuration"
 
         endif
 
+    menuconfig RTSMART_3RD_PARTY_ENABLE_MQTTCLIENT
+    bool "Enable Build MQTTClient"
+    default y
+
+    if RTSMART_3RD_PARTY_ENABLE_MQTTCLIENT
+        source "$(SDK_RTSMART_SRC_DIR)/libs/3rd-party/mqttclient/Kconfig"
+    endif
+
 endmenu

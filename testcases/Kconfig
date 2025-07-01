@@ -13,4 +13,7 @@ menuconfig RTSMART_LIBS_ENABLE_TESTCASES
             bool "Enable Build RtSmart Hal Drivers Tests"
             default n
 
+        config RTSMART_LIBS_MQTTCLIENT_ENABLE_TESTS
+            bool "Enable Build RtSmart MQTT Client Tests"
+            default n
     endif
