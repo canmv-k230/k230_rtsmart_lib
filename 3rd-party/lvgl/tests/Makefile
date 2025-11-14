@@ -1,9 +1,9 @@
 # Include base configuration
-include ../../mkenv.mk
-include ../../toolchain.mk
+include ../../../mkenv.mk
+include ../../../toolchain.mk
 
 # Build configuration
-BUILD := $(SDK_RTSMART_BUILD_DIR)/testcases/rtsmart_hal/
+BUILD =  $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/lvgl/tests/
 
 # Source files handling
 CFILES := $(wildcard *.c)
@@ -14,7 +14,8 @@ PROGRAMDEPS := $(patsubst %, $(BUILD)/%, $(CFILES:.c=.o.d))
 OBJ_DIRS := $(sort $(dir $(PROGRAMS)))
 
 # Library configuration
-include $(SDK_RTSMART_SRC_DIR)/libs/mk/librtsmart_hal.mk
+include $(SDK_RTSMART_SRC_DIR)/libs/mk/lib3rdparty.mk
+include $(SDK_RTSMART_SRC_DIR)/libs/mk/libmpp.mk
 
 # Compiler flags
 CFLAGS := -std=gnu99 -fopenmp -march=rv64imafdcv -mabi=lp64d -mcmodel=medany
@@ -31,7 +32,7 @@ LDFLAGS += $(LIB_LDFLAGS)
 .PHONY: all clean distclean check_path
 
 all: $(PROGRAMS)
-	@echo "[SUCCESS] Built all RTSmart HAL testcases"
+	@echo "[SUCCESS] Built all LVGL HAL testcases"
 
 clean:
 	@echo "Cleaning build artifacts..."

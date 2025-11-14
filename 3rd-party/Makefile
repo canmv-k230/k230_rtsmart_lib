@@ -5,6 +5,7 @@ include $(SDK_SRC_ROOT_DIR)/.config
 subdirs-y := 
 
 subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_FREETYPE) += freetype
+subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL) += lvgl
 subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS) += mbedtls
 subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_MQTTCLIENT) += mqttclient
 

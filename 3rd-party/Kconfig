@@ -8,6 +8,14 @@ menu "RT-Smart 3rd-party Configuration"
 
         endif
 
+    menuconfig RTSMART_3RD_PARTY_ENABLE_LVGL
+        bool "Enable Build LVGL"
+        default n
+
+        if RTSMART_3RD_PARTY_ENABLE_LVGL
+
+        endif
+
     menuconfig RTSMART_3RD_PARTY_ENABLE_MBEDTLS
         bool "Enable Build MbedTLS"
         default y
