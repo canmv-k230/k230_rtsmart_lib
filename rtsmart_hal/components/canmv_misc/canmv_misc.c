@@ -196,3 +196,65 @@ int canmv_misc_delete_encode_dev(int index)
 
     return 0;
 }
+
+int canmv_misc_register_touch_device(const char* name, struct canmv_touch_cfg_t* config)
+{
+    struct {
+        char name[TOUCH_DEVICE_NAME_LEN];
+        struct canmv_touch_cfg_t config;
+    } args;
+
+    if (!name || !config) {
+        return -1;
+    }
+
+    strncpy(args.name, name, TOUCH_DEVICE_NAME_LEN - 1);
+    args.name[TOUCH_DEVICE_NAME_LEN - 1] = '\0';
+    args.config = *config;
+
+    if (0x00 != canmv_misc_dev_ioctl(MISC_DEV_CMD_REGISTER_TOUCH_DEVICE, &args)) {
+        return -1;
+    }
+
+    return 0;
+}
+
+int canmv_misc_unregister_touch_device(const char* name)
+{
+    char device_name[TOUCH_DEVICE_NAME_LEN];
+
+    if (!name) {
+        return -1;
+    }
+
+    strncpy(device_name, name, TOUCH_DEVICE_NAME_LEN - 1);
+    device_name[TOUCH_DEVICE_NAME_LEN - 1] = '\0';
+
+    if (0x00 != canmv_misc_dev_ioctl(MISC_DEV_CMD_UNREGISTER_TOUCH_DEVICE, device_name)) {
+        return -1;
+    }
+
+    return 0;
+}
+
+int canmv_misc_get_touch_device(const char* name, struct canmv_touch_device_info_t* info)
+{
+    struct {
+        char name[TOUCH_DEVICE_NAME_LEN];
+        struct canmv_touch_device_info_t info;
+    } args;
+
+    if (!name || !info) {
+        return -1;
+    }
+
+    strncpy(args.name, name, TOUCH_DEVICE_NAME_LEN - 1);
+    args.name[TOUCH_DEVICE_NAME_LEN - 1] = '\0';
+
+    if (0x00 != canmv_misc_dev_ioctl(MISC_DEV_CMD_GET_TOUCH_DEVICE, &args)) {
+        return -1;
+    }
+
+    *info = args.info;
+    return 0;
+}

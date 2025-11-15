@@ -15,6 +15,7 @@ OBJ_DIRS := $(sort $(dir $(PROGRAMS)))
 
 # Library configuration
 include $(SDK_RTSMART_SRC_DIR)/libs/mk/lib3rdparty.mk
+include $(SDK_RTSMART_SRC_DIR)/libs/mk/librtsmart_hal.mk
 include $(SDK_RTSMART_SRC_DIR)/libs/mk/libmpp.mk
 
 # Compiler flags

@@ -170,6 +170,8 @@ lv_display_t* lv_k230_display_create(k_connector_type connector_type, k_vo_osd l
     lv_display_add_event_cb(disp, event_cb, LV_EVENT_COLOR_FORMAT_CHANGED, NULL);
     lv_display_add_event_cb(disp, event_cb, LV_EVENT_DELETE, NULL);
 
+    lv_tick_set_cb(tick_get_cb);
+
     return disp;
 
 _failed_osd_init:

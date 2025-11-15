@@ -32,6 +32,7 @@
 #include <signal.h>
 
 #include "../port/lv_k230_display.h"
+#include "../port/lv_k230_input_touch.h"
 
 #include "k_vb_comm.h"
 #include "lvgl.h"
@@ -497,6 +498,8 @@ int main(int argc, char* argv[])
     lv_display_set_color_format(disp, color_format);
     printf("Color format set successfully\n");
 
+    lv_k230_touch_init(0);
+
     // Create demo widgets
     create_demo_widgets(lv_scr_act());
     printf("Demo widgets created\n");
@@ -505,7 +508,7 @@ int main(int argc, char* argv[])
     // Main loop
     while (!g_signal_received) {
         // Handle LVGL tasks
-        uint32_t delay_ms = lv_timer_handler();
+        uint32_t delay_ms = lv_task_handler();
 
         if (100 < delay_ms) {
             delay_ms = 100;

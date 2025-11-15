@@ -50,6 +50,9 @@
 #define MISC_DEV_CMD_SET_AUTO_EXEC_PY_STAGE _IOWR('M', 0x0d, void*)
 #define MISC_DEV_CMD_CREATE_ROTARY_ENC_DEV  _IOWR('M', 0x0e, void*)
 #define MISC_DEV_CMD_DELETE_ROTARY_ENC_DEV  _IOWR('M', 0x0f, void*)
+#define MISC_DEV_CMD_REGISTER_TOUCH_DEVICE   _IOWR('M', 0x10, void*)
+#define MISC_DEV_CMD_UNREGISTER_TOUCH_DEVICE _IOWR('M', 0x11, void*)
+#define MISC_DEV_CMD_GET_TOUCH_DEVICE        _IOWR('M', 0x12, void*)
 
 #ifdef __cplusplus
 extern "C" {
@@ -94,6 +97,41 @@ struct encoder_dev_cfg_t {
     int index;
 
     struct encoder_pin_cfg_t cfg;
+};
+
+// MISC_DEV_CMD_REGISTER_TOUCH_DEVICE
+// MISC_DEV_CMD_UNREGISTER_TOUCH_DEVICE
+// MISC_DEV_CMD_GET_TOUCH_DEVICE
+#define TOUCH_MAX_USER_DEVICES      10
+#define TOUCH_DEVICE_NAME_LEN       16
+#define TOUCH_MAX_POINT_NUMBER      10
+
+struct canmv_touch_pin_cfg_t {
+    int intr;
+    int intr_edge;
+    int rst;
+    int rst_valid;
+};
+
+struct canmv_touch_i2c_cfg_t {
+    char name[32];
+    uint32_t speed;
+    uint16_t addr;
+    uint16_t reg_width;
+};
+
+struct canmv_touch_cfg_t {
+    struct canmv_touch_pin_cfg_t pin;
+    struct canmv_touch_i2c_cfg_t i2c;
+    int range_x;
+    int range_y;
+    int point_num;
+};
+
+struct canmv_touch_device_info_t {
+    char name[TOUCH_DEVICE_NAME_LEN];
+    struct canmv_touch_cfg_t config;
+    int is_registered;
 };
 
 static inline __attribute__((always_inline)) int canmv_misc_dev_ioctl(int cmd, void* args)
@@ -141,6 +179,10 @@ int canmv_misc_set_auto_exec_py_stage(int stage);
 
 int canmv_misc_create_encoder_dev(struct encoder_dev_cfg_t* cfg);
 int canmv_misc_delete_encode_dev(int index);
+
+int canmv_misc_register_touch_device(const char* name, struct canmv_touch_cfg_t* config);
+int canmv_misc_unregister_touch_device(const char* name);
+int canmv_misc_get_touch_device(const char* name, struct canmv_touch_device_info_t* info);
 
 #ifdef __cplusplus
 }
