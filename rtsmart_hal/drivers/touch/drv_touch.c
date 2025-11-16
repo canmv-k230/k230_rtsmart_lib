@@ -184,6 +184,10 @@ int drv_touch_read(drv_touch_inst_t* inst, struct drv_touch_data* touch_data, in
     }
 
     /* Return number of points read */
+    if (0x00 == bytes_read) {
+        return 0;
+    }
+
     return bytes_read / sizeof(struct drv_touch_data);
 }
 
