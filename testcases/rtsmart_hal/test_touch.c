@@ -86,7 +86,6 @@ void dump_touch_config(const struct drv_touch_config_t* config)
     printf("=== Touch Device Configuration ===\n");
     printf("Device Index:      %d\n", config->touch_dev_index);
     printf("Display Range:     %d x %d\n", config->range_x, config->range_y);
-    printf("Max Touch Points:  %d\n", config->point_num);
     printf("Interrupt Pin:     %d\n", config->pin_intr);
     printf("Interrupt Value:   %d\n", config->intr_value);
     printf("Reset Pin:         %d\n", config->pin_reset);
@@ -114,15 +113,6 @@ void dump_touch_config(const struct drv_touch_config_t* config)
             aspect_desc = "custom aspect ratio";
         }
         printf("  - Display: %dx%d (%.2f:1, %s)\n", config->range_x, config->range_y, aspect_ratio, aspect_desc);
-    }
-
-    /* Touch points analysis */
-    if (config->point_num == 1) {
-        printf("  - Single-touch device\n");
-    } else if (config->point_num >= 2 && config->point_num <= 5) {
-        printf("  - Multi-touch device (%d points)\n", config->point_num);
-    } else if (config->point_num > 5) {
-        printf("  - High-capacity multi-touch device (%d points)\n", config->point_num);
     }
 
     /* I2C speed analysis */
@@ -284,7 +274,6 @@ int main(int argc, char* argv[])
         .touch_dev_index = 1,
         .range_x         = 480,
         .range_y         = 800,
-        .point_num       = 5,
         .pin_intr        = 23,
         .intr_value      = 1,
         .pin_reset       = 22,
@@ -298,14 +287,19 @@ int main(int argc, char* argv[])
     new_device_config.pin_reset = -1;
 
     /* Command line option definitions */
-    static struct option long_options[]
-        = { { "device", required_argument, 0, 'd' },  { "create", no_argument, 0, 'c' },
-            { "index", required_argument, 0, 1 },     { "range-x", required_argument, 0, 2 },
-            { "range-y", required_argument, 0, 3 },   { "points", required_argument, 0, 4 },
-            { "int-pin", required_argument, 0, 5 },   { "int-value", required_argument, 0, 6 },
-            { "reset-pin", required_argument, 0, 7 }, { "reset-value", required_argument, 0, 8 },
-            { "i2c-bus", required_argument, 0, 9 },   { "i2c-speed", required_argument, 0, 10 },
-            { "help", no_argument, 0, 'h' },          { 0, 0, 0, 0 } };
+    static struct option long_options[] = { { "device", required_argument, 0, 'd' },
+                                            { "create", no_argument, 0, 'c' },
+                                            { "index", required_argument, 0, 1 },
+                                            { "range-x", required_argument, 0, 2 },
+                                            { "range-y", required_argument, 0, 3 },
+                                            { "int-pin", required_argument, 0, 5 },
+                                            { "int-value", required_argument, 0, 6 },
+                                            { "reset-pin", required_argument, 0, 7 },
+                                            { "reset-value", required_argument, 0, 8 },
+                                            { "i2c-bus", required_argument, 0, 9 },
+                                            { "i2c-speed", required_argument, 0, 10 },
+                                            { "help", no_argument, 0, 'h' },
+                                            { 0, 0, 0, 0 } };
 
     /* Parse command line arguments */
     int opt;
@@ -328,10 +322,6 @@ int main(int argc, char* argv[])
             break;
         case 3:
             new_device_config.range_y = atoi(optarg);
-            config_provided++;
-            break;
-        case 4:
-            new_device_config.point_num = atoi(optarg);
             config_provided++;
             break;
         case 5:
@@ -376,7 +366,7 @@ int main(int argc, char* argv[])
 
     if (create_new && (10 == config_provided)) {
         /* Validate required configuration */
-        if (new_device_config.range_x == 0 || new_device_config.range_y == 0 || new_device_config.point_num == 0) {
+        if (new_device_config.range_x == 0 || new_device_config.range_y == 0) {
             fprintf(stderr, "Error: Invalid configuration parameters\n");
             print_usage(argv[0]);
             return EXIT_FAILURE;
