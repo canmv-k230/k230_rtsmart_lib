@@ -33,6 +33,8 @@ extern "C" {
 #include <stdint.h>
 #include <sys/time.h>
 
+#include "canmv_misc.h"
+
 #define KD_HARD_TOUCH_MAX_NUM (10)
 
 /* Touch event definitions */
@@ -71,13 +73,12 @@ struct drv_touch_info {
     uint32_t range_y; /* Y coordinate range */
 };
 
-
 /* Touch instance structure */
 typedef struct _drv_touch_inst {
     void* base;
 
-    int id, fd;
-    struct drv_touch_info   info;
+    int                   id, fd;
+    struct drv_touch_info info;
 } drv_touch_inst_t;
 
 /**
@@ -135,6 +136,8 @@ int drv_touch_reset(drv_touch_inst_t* inst);
  *         -2: IOCTL error
  */
 int drv_touch_get_default_rotate(drv_touch_inst_t* inst, int* rotate);
+
+int drv_touch_get_config(drv_touch_inst_t* inst, struct drv_touch_config_t* cfg);
 
 /* Helper macros for getting instance attributes */
 #ifndef MEMBER_TYPE

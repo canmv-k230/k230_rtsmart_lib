@@ -13,7 +13,9 @@ menu "RT-Smart 3rd-party Configuration"
         default n
 
         if RTSMART_3RD_PARTY_ENABLE_LVGL
-
+            config RTSMART_3RD_PARTY_ENABLE_LVGL_EXAMPLES
+                bool "Enable LVGL Examples"
+                default n
         endif
 
     menuconfig RTSMART_3RD_PARTY_ENABLE_MBEDTLS

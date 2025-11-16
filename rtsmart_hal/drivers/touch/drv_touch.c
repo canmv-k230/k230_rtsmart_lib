@@ -41,6 +41,7 @@
 #define DRV_TOUCH_CTRL_GET_INFO       (21 * 0x100 + 1)
 #define DRV_TOUCH_CTRL_RESET          (21 * 0x100 + 11)
 #define DRV_TOUCH_CTRL_GET_DFT_ROTATE (21 * 0x100 + 12)
+#define RT_TOUCH_CTRL_GET_DEVICE_CFG  (21 * 0x100 + 13)
 
 static const int _drv_touch_inst_type; /**< Unique identifier for touch instance type */
 static int       _drv_touch_state[KD_HARD_TOUCH_MAX_NUM]; /**< Tracks usage state of each touch interface */
@@ -248,6 +249,21 @@ int drv_touch_get_default_rotate(drv_touch_inst_t* inst, int* rotate)
 
     /* Get default rotation via IOCTL */
     if (ioctl(inst->fd, DRV_TOUCH_CTRL_GET_DFT_ROTATE, rotate) < 0) {
+        return -2;
+    }
+
+    return 0;
+}
+
+int drv_touch_get_config(drv_touch_inst_t* inst, struct drv_touch_config_t* cfg)
+{
+    /* Parameter validation */
+    if (inst == NULL || cfg == NULL || inst->fd == -1) {
+        return -1;
+    }
+
+    /* Get default rotation via IOCTL */
+    if (ioctl(inst->fd, RT_TOUCH_CTRL_GET_DEVICE_CFG, cfg) < 0) {
         return -2;
     }
 
