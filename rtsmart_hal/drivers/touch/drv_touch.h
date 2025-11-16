@@ -71,52 +71,24 @@ struct drv_touch_info {
     uint32_t range_y; /* Y coordinate range */
 };
 
-/* Touch configuration structure */
-struct drv_touch_config {
-    uint8_t  type; /* Touch controller type */
-    uint8_t  rotate; /* Touch rotation */
-    uint32_t range_x; /* X coordinate range */
-    uint32_t range_y; /* Y coordinate range */
-    uint8_t  dev_type; /* Device type (system/user) */
-};
 
 /* Touch instance structure */
 typedef struct _drv_touch_inst {
     void* base;
 
     int id, fd;
-
-    struct drv_touch_config config;
     struct drv_touch_info   info;
 } drv_touch_inst_t;
 
 /**
  * @brief Create a touch driver instance
  * @param id Touch interface ID (0 to KD_HARD_TOUCH_MAX_NUM-1)
- * @param dev Touch Device Name (optional, can be NULL for system devices)
- * @param inst Double pointer to store the created instance
  * @return 0 on success, negative error code on failure:
  *         -1: Invalid parameters
  *         -2: Invalid touch ID
  *         -3: Memory allocation failed
  */
-int _drv_touch_inst_create(int id, const char* dev, drv_touch_inst_t** inst);
-
-/**
- * @brief Create a touch driver instance for system device
- * @param id Touch interface ID
- * @param inst Double pointer to store the created instance
- * @return 0 on success, negative error code on failure
- */
-#define drv_touch_inst_create(id, inst) _drv_touch_inst_create(id, NULL, inst)
-
-/**
- * @brief Create a touch driver instance for custom device
- * @param dev Touch device name
- * @param inst Double pointer to store the created instance
- * @return 0 on success, negative error code on failure
- */
-#define drv_touch_inst_create_device(dev, inst) _drv_touch_inst_create(-1, dev, inst)
+int drv_touch_inst_create(int id, drv_touch_inst_t** inst);
 
 /**
  * @brief Destroy a touch driver instance

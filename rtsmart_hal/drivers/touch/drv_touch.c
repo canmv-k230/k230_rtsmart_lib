@@ -48,14 +48,13 @@ static int       _drv_touch_state[KD_HARD_TOUCH_MAX_NUM]; /**< Tracks usage stat
 /**
  * @brief Create a touch driver instance
  * @param id Touch interface ID (0 to KD_HARD_TOUCH_MAX_NUM-1)
- * @param dev Touch Device Name (used for custom touch device)
  * @param inst Double pointer to store the created instance
  * @return 0 on success, negative error code on failure:
  *         -1: Invalid parameters
  *         -2: Invalid touch ID
  *         -3: Memory allocation failed
  */
-int _drv_touch_inst_create(int id, const char* dev, drv_touch_inst_t** inst)
+int drv_touch_inst_create(int id, drv_touch_inst_t** inst)
 {
     int  fd = -1;
     char dev_name[64];
@@ -65,24 +64,18 @@ int _drv_touch_inst_create(int id, const char* dev, drv_touch_inst_t** inst)
         return -1;
     }
 
-    if (NULL == dev) {
-        /* Check touch ID range */
-        if (KD_HARD_TOUCH_MAX_NUM <= id) {
-            printf("[hal_touch]: invalid id\n");
-            return -2;
-        }
-
-        /* Check if touch is already in use */
-        if (0x00 != _drv_touch_state[id]) {
-            printf("[hal_touch]: touch%d maybe in use\n", id);
-        }
-
-        snprintf(dev_name, sizeof(dev_name), "/dev/touch%d", id);
-    } else {
-        id = -1;
-
-        strncpy(dev_name, dev, sizeof(dev_name) - 1);
+    /* Check touch ID range */
+    if (KD_HARD_TOUCH_MAX_NUM <= id) {
+        printf("[hal_touch]: invalid id\n");
+        return -2;
     }
+
+    /* Check if touch is already in use */
+    if (0x00 != _drv_touch_state[id]) {
+        printf("[hal_touch]: touch%d maybe in use\n", id);
+    }
+
+    snprintf(dev_name, sizeof(dev_name), "/dev/touch%d", id);
     dev_name[sizeof(dev_name) - 1] = '\0';
 
     /* Clean up existing instance if provided */
@@ -110,11 +103,6 @@ int _drv_touch_inst_create(int id, const char* dev, drv_touch_inst_t** inst)
     (*inst)->base = (void*)&_drv_touch_inst_type;
     (*inst)->id   = id;
     (*inst)->fd   = fd;
-
-    /* Initialize default configuration */
-    (*inst)->config.rotate  = DRV_TOUCH_ROTATE_DEGREE_0;
-    (*inst)->config.range_x = 0;
-    (*inst)->config.range_y = 0;
 
     /* Get device information */
     if (0 != drv_touch_get_info(*inst, &(*inst)->info)) {
