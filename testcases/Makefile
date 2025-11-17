@@ -1,6 +1,6 @@
 include ../mkenv.mk
 
-subdirs-y := rtsmart_hal
+subdirs-$(CONFIG_RTSMART_LIBS_HAL_ENABLE_TESTS) := rtsmart_hal
 
 .PHONY: all clean distclean
 

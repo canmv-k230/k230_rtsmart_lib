@@ -13,7 +13,8 @@ subdirs-y := \
 	pwm \
 	uart \
 	ws2812 \
-	onewire 
+	onewire \
+	touch
 
 subdirs-$(CONFIG_ENABLE_ROTARY_ENCODER) += rotary_encoder
 

@@ -196,3 +196,25 @@ int canmv_misc_delete_encode_dev(int index)
 
     return 0;
 }
+
+int canmv_misc_create_touch_device(struct drv_touch_config_t* cfg)
+{
+    if (!cfg) {
+        return -1;
+    }
+
+    if (0x00 != canmv_misc_dev_ioctl(MISC_DEV_CMD_REGISTER_TOUCH_DEVICE, cfg)) {
+        return -1;
+    }
+
+    return 0;
+}
+
+int canmv_misc_delete_touch_device(int index)
+{
+    if (0x00 != canmv_misc_dev_ioctl(MISC_DEV_CMD_UNREGISTER_TOUCH_DEVICE, &index)) {
+        return -1;
+    }
+
+    return 0;
+}

@@ -35,21 +35,23 @@
 #include <time.h>
 #include <unistd.h>
 
-#define MISC_DEV_CMD_READ_HEAP              _IOWR('M', 0x00, void*)
-#define MISC_DEV_CMD_READ_PAGE              _IOWR('M', 0x01, void*)
-#define MISC_DEV_CMD_GET_MEMORY_SIZE        _IOWR('M', 0x02, void*)
-#define MISC_DEV_CMD_CPU_USAGE              _IOWR('M', 0x03, void*)
-#define MISC_DEV_CMD_CREATE_SOFT_I2C        _IOWR('M', 0x04, void*)
-#define MISC_DEV_CMD_DELETE_SOFT_I2C        _IOWR('M', 0x05, void*)
-#define MISC_DEV_CMD_NTP_SYNC               _IOWR('M', 0x07, void*)
-#define MISC_DEV_CMD_GET_UTC_TIMESTAMP      _IOWR('M', 0x08, void*)
-#define MISC_DEV_CMD_SET_UTC_TIMESTAMP      _IOWR('M', 0x09, void*)
-#define MISC_DEV_CMD_GET_LOCAL_TIME         _IOWR('M', 0x0a, void*)
-#define MISC_DEV_CMD_SET_TIMEZONE           _IOWR('M', 0x0b, void*)
-#define MISC_DEV_CMD_GET_TIMEZONE           _IOWR('M', 0x0c, void*)
-#define MISC_DEV_CMD_SET_AUTO_EXEC_PY_STAGE _IOWR('M', 0x0d, void*)
-#define MISC_DEV_CMD_CREATE_ROTARY_ENC_DEV  _IOWR('M', 0x0e, void*)
-#define MISC_DEV_CMD_DELETE_ROTARY_ENC_DEV  _IOWR('M', 0x0f, void*)
+#define MISC_DEV_CMD_READ_HEAP               _IOWR('M', 0x00, void*)
+#define MISC_DEV_CMD_READ_PAGE               _IOWR('M', 0x01, void*)
+#define MISC_DEV_CMD_GET_MEMORY_SIZE         _IOWR('M', 0x02, void*)
+#define MISC_DEV_CMD_CPU_USAGE               _IOWR('M', 0x03, void*)
+#define MISC_DEV_CMD_CREATE_SOFT_I2C         _IOWR('M', 0x04, void*)
+#define MISC_DEV_CMD_DELETE_SOFT_I2C         _IOWR('M', 0x05, void*)
+#define MISC_DEV_CMD_NTP_SYNC                _IOWR('M', 0x07, void*)
+#define MISC_DEV_CMD_GET_UTC_TIMESTAMP       _IOWR('M', 0x08, void*)
+#define MISC_DEV_CMD_SET_UTC_TIMESTAMP       _IOWR('M', 0x09, void*)
+#define MISC_DEV_CMD_GET_LOCAL_TIME          _IOWR('M', 0x0a, void*)
+#define MISC_DEV_CMD_SET_TIMEZONE            _IOWR('M', 0x0b, void*)
+#define MISC_DEV_CMD_GET_TIMEZONE            _IOWR('M', 0x0c, void*)
+#define MISC_DEV_CMD_SET_AUTO_EXEC_PY_STAGE  _IOWR('M', 0x0d, void*)
+#define MISC_DEV_CMD_CREATE_ROTARY_ENC_DEV   _IOWR('M', 0x0e, void*)
+#define MISC_DEV_CMD_DELETE_ROTARY_ENC_DEV   _IOWR('M', 0x0f, void*)
+#define MISC_DEV_CMD_REGISTER_TOUCH_DEVICE   _IOWR('M', 0x10, void*)
+#define MISC_DEV_CMD_UNREGISTER_TOUCH_DEVICE _IOWR('M', 0x11, void*)
 
 #ifdef __cplusplus
 extern "C" {
@@ -94,6 +96,21 @@ struct encoder_dev_cfg_t {
     int index;
 
     struct encoder_pin_cfg_t cfg;
+};
+
+struct drv_touch_config_t {
+    int touch_dev_index;
+
+    int range_x;
+    int range_y;
+
+    int pin_intr;
+    int intr_value;
+    int pin_reset;
+    int reset_value;
+
+    int i2c_bus_index;
+    int i2c_bus_speed;
 };
 
 static inline __attribute__((always_inline)) int canmv_misc_dev_ioctl(int cmd, void* args)
@@ -141,6 +158,9 @@ int canmv_misc_set_auto_exec_py_stage(int stage);
 
 int canmv_misc_create_encoder_dev(struct encoder_dev_cfg_t* cfg);
 int canmv_misc_delete_encode_dev(int index);
+
+int canmv_misc_create_touch_device(struct drv_touch_config_t* cfg);
+int canmv_misc_delete_touch_device(int index);
 
 #ifdef __cplusplus
 }

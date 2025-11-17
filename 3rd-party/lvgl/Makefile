@@ -37,8 +37,14 @@ CFILES_ALL		= $(foreach dir, $(SRC_DIRS), $(wildcard $(dir)/*.c))
 CXXFILES_ALL	= $(foreach dir, $(SRC_DIRS), $(wildcard $(dir)/*.cpp))
 
 include lvgl/lvgl.mk
-CFILES_ALL += $(CSRCS)
-CXXFILES_ALL += $(CXXSRCS)
+# Use patsubst to replace the absolute prefix with nothing
+CFILES_ALL += $(patsubst $(LOCAL_SRC_DIR)/%,%,$(CSRCS))
+CXXFILES_ALL += $(patsubst $(LOCAL_SRC_DIR)/%,%,$(CXXSRCS))
+
+ifneq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL_EXAMPLES),y)
+CFILES_EXCLUDE += lvgl/demos/%
+CFILES_EXCLUDE += lvgl/examples/%
+endif
 
 CFILES      += $(filter-out $(CFILES_EXCLUDE), $(CFILES_ALL))
 CXXFILES    += $(filter-out $(CXXFILES_EXCLUDE), $(CXXFILES_ALL))
