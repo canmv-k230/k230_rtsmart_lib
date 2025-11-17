@@ -20,5 +20,6 @@ menuconfig RTSMART_LIBS_ENABLE_TESTCASES
 
         config RTSMART_LIBS_MQTTCLIENT_ENABLE_TESTS
             bool "Enable Build RtSmart MQTT Client Tests"
+            depends on RTSMART_3RD_PARTY_ENABLE_MQTTCLIENT
             default n
     endif

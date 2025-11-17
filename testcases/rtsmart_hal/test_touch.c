@@ -213,20 +213,20 @@ void print_usage(const char* program_name)
     printf("  -d, --device ID        Use existing touch device ID (default: 0)\n");
     printf("  -c, --create           Create new touch device with configuration\n");
     printf("  --index INDEX          Touch device index for new device (required with --create)\n");
-    printf("  --range-x WIDTH        X-axis range (required with --create)\n");
-    printf("  --range-y HEIGHT       Y-axis range (required with --create)\n");
-    printf("  --points NUM           Number of touch points (required with --create)\n");
-    printf("  --int-pin PIN          Interrupt pin (required with --create)\n");
-    printf("  --int-value VALUE      Interrupt pin value (required with --create)\n");
-    printf("  --reset-pin PIN        Reset pin (required with --create)\n");
-    printf("  --reset-value VALUE    Reset pin value (required with --create)\n");
     printf("  --i2c-bus BUS          I2C bus index (required with --create)\n");
     printf("  --i2c-speed SPEED      I2C bus speed (required with --create)\n");
-    printf("  --dump-config          Dump configuration without creating device\n");
+
+    printf("  --range-x WIDTH        X-axis range\n");
+    printf("  --range-y HEIGHT       Y-axis range\n");
+    printf("  --int-pin PIN          Interrupt pin\n");
+    printf("  --int-value VALUE      Interrupt pin value\n");
+    printf("  --reset-pin PIN        Reset pin\n");
+    printf("  --reset-value VALUE    Reset pin value\n");
+
     printf("  -h, --help             Show this help message\n\n");
     printf("Examples:\n");
     printf("  %s -d 0                    # Test default touch device 0\n", program_name);
-    printf("  %s -c --index 1 --range-x 480 --range-y 800 --points 5 --int-pin 23 --int-value 1 --reset-pin 22 --reset-value 0 "
+    printf("  %s -c --index 1 --range-x 480 --range-y 800 --int-pin 23 --int-value 1 --reset-pin 22 --reset-value 0 "
            "--i2c-bus 3 --i2c-speed 400000 # Create and test new touch device\n",
            program_name);
 }
@@ -269,14 +269,13 @@ int main(int argc, char* argv[])
     /* Command line options */
     int                       device_id         = 0;
     int                       create_new        = 0;
-    int                       config_provided   = 0;
     struct drv_touch_config_t new_device_config = {
         .touch_dev_index = 1,
         .range_x         = 0, // use system default
         .range_y         = 0, // use system default
-        .pin_intr        = 23,
-        .intr_value      = 1,
-        .pin_reset       = 22,
+        .pin_intr        = -1,
+        .intr_value      = 0,
+        .pin_reset       = -1,
         .reset_value     = 0,
         .i2c_bus_index   = 3,
         .i2c_bus_speed   = 400000,
@@ -314,39 +313,30 @@ int main(int argc, char* argv[])
             break;
         case 1:
             new_device_config.touch_dev_index = atoi(optarg);
-            config_provided++;
             break;
         case 2:
             new_device_config.range_x = atoi(optarg);
-            config_provided++;
             break;
         case 3:
             new_device_config.range_y = atoi(optarg);
-            config_provided++;
             break;
         case 5:
             new_device_config.pin_intr = atoi(optarg);
-            config_provided++;
             break;
         case 6:
             new_device_config.intr_value = atoi(optarg);
-            config_provided++;
             break;
         case 7:
             new_device_config.pin_reset = atoi(optarg);
-            config_provided++;
             break;
         case 8:
             new_device_config.reset_value = atoi(optarg);
-            config_provided++;
             break;
         case 9:
             new_device_config.i2c_bus_index = atoi(optarg);
-            config_provided++;
             break;
         case 10:
             new_device_config.i2c_bus_speed = atoi(optarg);
-            config_provided++;
             break;
         case 'h':
             print_usage(argv[0]);
@@ -356,23 +346,6 @@ int main(int argc, char* argv[])
             return EXIT_FAILURE;
         }
     }
-
-    /* Validate arguments */
-    if (create_new && (8 > config_provided)) {
-        fprintf(stderr, "Error: --create requires all configuration parameters\n");
-        print_usage(argv[0]);
-        return EXIT_FAILURE;
-    }
-
-    if (create_new && (8 <= config_provided)) {
-        /* Validate required configuration */
-        if (new_device_config.range_x == 0 || new_device_config.range_y == 0) {
-            fprintf(stderr, "Error: Invalid configuration parameters\n");
-            print_usage(argv[0]);
-            return EXIT_FAILURE;
-        }
-    }
-
     printf("Touch Device Test Application\n");
     printf("=============================\n");
 
