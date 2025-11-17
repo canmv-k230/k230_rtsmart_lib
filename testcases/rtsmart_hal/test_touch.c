@@ -272,8 +272,8 @@ int main(int argc, char* argv[])
     int                       config_provided   = 0;
     struct drv_touch_config_t new_device_config = {
         .touch_dev_index = 1,
-        .range_x         = 480,
-        .range_y         = 800,
+        .range_x         = 0, // use system default
+        .range_y         = 0, // use system default
         .pin_intr        = 23,
         .intr_value      = 1,
         .pin_reset       = 22,
@@ -358,13 +358,13 @@ int main(int argc, char* argv[])
     }
 
     /* Validate arguments */
-    if (create_new && (10 != config_provided)) {
+    if (create_new && (8 > config_provided)) {
         fprintf(stderr, "Error: --create requires all configuration parameters\n");
         print_usage(argv[0]);
         return EXIT_FAILURE;
     }
 
-    if (create_new && (10 == config_provided)) {
+    if (create_new && (8 <= config_provided)) {
         /* Validate required configuration */
         if (new_device_config.range_x == 0 || new_device_config.range_y == 0) {
             fprintf(stderr, "Error: Invalid configuration parameters\n");
