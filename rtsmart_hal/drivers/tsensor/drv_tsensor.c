@@ -26,49 +26,59 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
+#include <stdint.h> // Added for clarity on uint8_t
+#include <stdio.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <pthread.h>
-#include <stdio.h>
 
 #include "drv_tsensor.h"
 
 struct tsensor_dev {
-    int fd;
+    int                fd;
     pthread_spinlock_t lock;
 };
 
-static struct tsensor_dev ts_dev =
-{
-    .fd = -1,
-    .lock = (pthread_spinlock_t)0
-};
+// Global device structure managing the single file descriptor
+static struct tsensor_dev ts_dev = { .fd = -1, .lock = (pthread_spinlock_t)0 };
 
+/**
+ * @brief Opens the temperature sensor device file if it's not already open.
+ * @return The file descriptor on success, or -1 on failure.
+ */
 static int open_ts_dev()
 {
     pthread_spin_lock(&ts_dev.lock);
 
+    // 1. Check if already open
     if (ts_dev.fd >= 0) {
-        /* already open */
-        goto out;
+        goto unlock;
     }
 
+    // 2. Attempt to open
     ts_dev.fd = open("/dev/ts", O_RDWR);
     if (ts_dev.fd < 0) {
         printf("[hal_tsensor]: open dev fail: %s (errno: %d)\n", strerror(errno), errno);
-        goto out;
     }
 
-out:
+unlock:
     pthread_spin_unlock(&ts_dev.lock);
 
     return ts_dev.fd;
 }
 
-int drv_tsensor_read_temperature(double *temp)
+/**
+ * @brief Reads the temperature from the sensor with retry logic for EINTR.
+ * @param temp Pointer to store the temperature (double).
+ * @return 0 on success, -1 on failure.
+ */
+int drv_tsensor_read_temperature(double* temp)
 {
-    int fd, ret = 0;
+    int    fd, ret = 0;
+    size_t bytes_to_read = sizeof(*temp);
+    size_t bytes_read    = 0;
+    char*  buf           = (char*)temp; // Use a char pointer for byte arithmetic
 
     fd = open_ts_dev();
     if (fd < 0) {
@@ -76,26 +86,46 @@ int drv_tsensor_read_temperature(double *temp)
         goto out;
     }
 
-    ret = read(fd, temp, sizeof(*temp));
-    if (ret != sizeof(*temp)) {
-        printf("[hal_tsensor]: read temperature fail: %s (errno: %d, ret: %d)\n", strerror(errno), errno, ret);
-        ret = -1;
-        goto err;
+    // Loop until all bytes are read
+    while (bytes_read < bytes_to_read) {
+        ret = read(fd, buf + bytes_read, bytes_to_read - bytes_read);
+
+        if (ret > 0) {
+            // Success: bytes were read
+            bytes_read += ret;
+        } else if (ret == 0) {
+            // End-of-file (unexpected for device read)
+            printf("[hal_tsensor]: read temperature fail: unexpected EOF\n");
+            ret = -1;
+            goto out;
+        } else { // ret < 0, an error occurred
+            if (errno == EINTR) {
+                // Interrupted system call (EINTR, errno: 4). Retry the operation.
+                continue;
+            }
+
+            // A non-recoverable error occurred (e.g., EIO, EBADF)
+            printf("[hal_tsensor]: read temperature fail: %s (errno: %d, ret: %d)\n", strerror(errno), errno, ret);
+            ret = -1;
+            goto out;
+        }
     }
 
+    // If we reach here, bytes_read == bytes_to_read.
     ret = 0;
+
 out:
-    return ret;
-
-err:
-    close(fd);
-
     return ret;
 }
 
+/**
+ * @brief Sets the operating mode of the temperature sensor (Single/Continuous).
+ * @param mode The desired mode (RT_DEVICE_TS_CTRL_MODE_SINGLE or RT_DEVICE_TS_CTRL_MODE_CONTINUUOS).
+ * @return 0 on success, -1 on failure.
+ */
 int drv_tsensor_set_mode(uint8_t mode)
 {
-    int fd, ret = 0;
+    int     fd, ret = 0;
     uint8_t _mode = mode;
 
     fd = open_ts_dev();
@@ -104,32 +134,31 @@ int drv_tsensor_set_mode(uint8_t mode)
         goto out;
     }
 
-    if ((_mode != RT_DEVICE_TS_CTRL_MODE_SINGLE) &&
-        (_mode != RT_DEVICE_TS_CTRL_MODE_CONTINUUOS)) {
+    if ((_mode != RT_DEVICE_TS_CTRL_MODE_SINGLE) && (_mode != RT_DEVICE_TS_CTRL_MODE_CONTINUUOS)) {
         printf("[hal_tsensor]: unsupport ts mode\n");
         ret = -1;
-        goto err;
+        goto out;
     }
 
     ret = ioctl(fd, RT_DEVICE_TS_CTRL_SET_MODE, &_mode);
     if (ret) {
         printf("[hal_tsensor]: ts set mode fail: %s (errno: %d, ret: %d)\n", strerror(errno), errno, ret);
         ret = -1;
-        goto err;
+        goto out;
     }
 
 out:
     return ret;
-
-err:
-    close(fd);
-
-    return ret;
 }
 
+/**
+ * @brief Sets the trimming/calibration value for the sensor.
+ * @param trim The desired trim value.
+ * @return 0 on success, -1 on failure.
+ */
 int drv_tsensor_set_trim(uint8_t trim)
 {
-    int fd, ret = 0;
+    int     fd, ret = 0;
     uint8_t _trim = trim;
 
     fd = open_ts_dev();
@@ -141,26 +170,26 @@ int drv_tsensor_set_trim(uint8_t trim)
     if (_trim > RT_DEVICE_TS_CTRL_MAX_TRIM) {
         ret = -1;
         printf("[hal_tsensor]: too large ts trim value\n");
-        goto err;
+        goto out;
     }
 
     ret = ioctl(fd, RT_DEVICE_TS_CTRL_SET_TRIM, &_trim);
     if (ret) {
         printf("[hal_tsensor]: ts set trim fail: %s (errno: %d, ret: %d)\n", strerror(errno), errno, ret);
         ret = -1;
-        goto err;
+        goto out;
     }
 
 out:
     return ret;
-
-err:
-    close(fd);
-
-    return ret;
 }
 
-int drv_tsensor_get_mode(uint8_t *mode)
+/**
+ * @brief Gets the current operating mode of the sensor.
+ * @param mode Pointer to store the current mode.
+ * @return 0 on success, -1 on failure.
+ */
+int drv_tsensor_get_mode(uint8_t* mode)
 {
     int fd, ret = 0;
 
@@ -174,18 +203,18 @@ int drv_tsensor_get_mode(uint8_t *mode)
     if (ret) {
         printf("[hal_tsensor]: ts get mode fail: %s (errno: %d, ret: %d)\n", strerror(errno), errno, ret);
         ret = -1;
-        goto err;
+        goto out;
     }
 out:
     return ret;
-
-err:
-    close(fd);
-
-    return ret;
 }
 
-int drv_tsensor_get_trim(uint8_t *trim)
+/**
+ * @brief Gets the current trimming/calibration value.
+ * @param trim Pointer to store the current trim value.
+ * @return 0 on success, -1 on failure.
+ */
+int drv_tsensor_get_trim(uint8_t* trim)
 {
     int fd, ret = 0;
 
@@ -199,13 +228,8 @@ int drv_tsensor_get_trim(uint8_t *trim)
     if (ret) {
         printf("[hal_tsensor]: ts get trim fail: %s (errno: %d, ret: %d)\n", strerror(errno), errno, ret);
         ret = -1;
-        goto err;
+        goto out;
     }
 out:
-    return ret;
-
-err:
-    close(fd);
-
     return ret;
 }
