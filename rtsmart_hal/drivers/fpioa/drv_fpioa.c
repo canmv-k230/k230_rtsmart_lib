@@ -33,8 +33,10 @@
 #include <unistd.h>
 
 #include "drv_fpioa.h"
+#include "hal_utils.h"
 
-#define IOMUX_REG_ADD 0X91105000
+#define IOMUX_REG_ADDR     0x91105000
+#define PMU_IOMUX_REG_ADDR 0x91000080
 
 #pragma pack(1)
 
@@ -164,6 +166,16 @@ static const fpioa_func_cfg_t g_func_describ_array[] = {
     { CTRL_IN_3D, "CTRL_IN_3D", 0x10F },
     { CTRL_O1_3D, "CTRL_O1_3D", 0x08E },
     { CTRL_O2_3D, "CTRL_O2_3D", 0x08E },
+
+    // PMU
+    { PMU_INT0, "PMU_INT0", 0x1126 },
+    { PMU_INT1, "PMU_INT1", 0x1126 },
+    { PMU_INT2, "PMU_INT2", 0x1126 },
+    { PMU_INT3, "PMU_INT3", 0x1126 },
+    { PMU_INT4, "PMU_INT4", 0x1126 },
+    { PMU_INT5, "PMU_INT5", 0x1126 },
+    { PMU_OUT0, "PMU_OUT0", 0x1086 },
+    { PMU_OUT1, "PMU_OUT1", 0x1086 },
 };
 
 static const uint8_t g_pin_func_array[][FPIOA_PIN_MAX_FUNCS] = {
@@ -231,62 +243,193 @@ static const uint8_t g_pin_func_array[][FPIOA_PIN_MAX_FUNCS] = {
     { GPIO61, PWM1, IIC0_SDA, QSPI0_CS1, VSYNC1 },
     { GPIO62, M_CLK2, UART3_DE, TEST_PIN14, FUNC_MAX },
     { GPIO63, M_CLK3, UART3_RE, TEST_PIN15, FUNC_MAX },
+    // PMU
+    { GPIO64, PMU_INT0, FUNC_MAX, FUNC_MAX, FUNC_MAX },
+    { GPIO65, PMU_INT1, FUNC_MAX, FUNC_MAX, FUNC_MAX },
+    { GPIO66, PMU_INT2, FUNC_MAX, FUNC_MAX, FUNC_MAX },
+    { GPIO67, PMU_INT3, FUNC_MAX, FUNC_MAX, FUNC_MAX },
+    { GPIO68, PMU_INT4, FUNC_MAX, FUNC_MAX, FUNC_MAX },
+    { GPIO69, PMU_INT5, FUNC_MAX, FUNC_MAX, FUNC_MAX },
+    { GPIO70, PMU_OUT0, FUNC_MAX, FUNC_MAX, FUNC_MAX },
+    { GPIO71, PMU_OUT1, FUNC_MAX, FUNC_MAX, FUNC_MAX },
 };
 
 #pragma pack()
 
-static volatile uint32_t* fpioa_reg = NULL;
+typedef struct _fpioa_pmu_iomux_cfg {
+    union {
+        struct {
+            uint32_t st : 1; // bit 0    输入施密特触发器控制使能
+            uint32_t ds : 3; // bit 1-3  驱动电流控制
+            uint32_t resv_4 : 1; // bit 4
+            uint32_t pd : 1; // bit 5    下拉使能
+            uint32_t pu : 1; // bit 6    上拉使能
+            uint32_t oe : 1; // bit 7    输出使能
+            uint32_t ie : 1; // bit 8    输入使能
+            uint32_t resv_9 : 1; // bit 9
+            uint32_t sl : 1; // bit 10 slewrate
+            uint32_t io_sel : 2; // bit 11-12 复用功能选择
+            uint32_t rsv_bit13_31 : 19; // bit 13-31
+        } bit;
+        uint32_t value;
+    } u;
+} fpioa_pmuiomux_cfg_t;
 
-static volatile uint32_t* check_fpioa(void)
+static uint32_t convert_iomux_to_pmu(uint32_t data)
 {
-    if (NULL == fpioa_reg) {
-        int mem_fd = -1;
-        if (0 > mem_fd) {
-            if (0 > (mem_fd = open("/dev/mem", O_RDWR | O_SYNC))) {
-                printf("[hal_fpioa]: open /dev/mem failed\n");
-                return NULL;
-            }
-        }
+    fpioa_iomux_cfg_t    src;
+    fpioa_pmuiomux_cfg_t dst;
 
-        fpioa_reg = (uint32_t*)mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, IOMUX_REG_ADD);
+    src.u.value = data;
+    dst.u.value = 0;
 
-        close(mem_fd);
-        mem_fd = -1;
+    dst.u.bit.st = src.u.bit.st;
+    dst.u.bit.pd = src.u.bit.pd;
+    dst.u.bit.pu = src.u.bit.pu;
+    dst.u.bit.oe = src.u.bit.oe;
+    dst.u.bit.ie = src.u.bit.ie;
 
-        if (fpioa_reg == NULL) {
+    dst.u.bit.ds = src.u.bit.ds & 0x7;
+
+    dst.u.bit.io_sel = src.u.bit.io_sel & 0x3;
+    dst.u.bit.io_sel += 1;
+
+    return dst.u.value;
+}
+
+static uint32_t convert_pmu_to_iomux(uint32_t data)
+{
+    fpioa_pmuiomux_cfg_t src;
+    fpioa_iomux_cfg_t    dst;
+
+    src.u.value = data;
+    dst.u.value = 0;
+
+    dst.u.bit.st = src.u.bit.st;
+    dst.u.bit.pd = src.u.bit.pd;
+    dst.u.bit.pu = src.u.bit.pu;
+    dst.u.bit.oe = src.u.bit.oe;
+    dst.u.bit.ie = src.u.bit.ie;
+
+    dst.u.bit.ds = src.u.bit.ds;
+
+    dst.u.bit.io_sel = src.u.bit.io_sel;
+    dst.u.bit.io_sel -= 1;
+
+    return dst.u.value;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// IOMUX //////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+static volatile uint32_t*      iomux_reg  = NULL;
+static struct utils_memory_map iomux_mmap = { .fd = -1, .base = NULL };
+
+static volatile uint32_t* mmap_iomux(void)
+{
+    if (NULL == iomux_reg) {
+        iomux_reg = utils_map_memory(&iomux_mmap, IOMUX_REG_ADDR);
+
+        if (iomux_reg == NULL) {
             printf("[hal_fpioa]: mmap fpioa failed\n");
             return NULL;
         }
     }
 
-    return fpioa_reg;
+    return iomux_reg;
+}
+
+static inline int drv_fpioa_get_iomux(int pin, uint32_t* value)
+{
+    if (NULL == mmap_iomux()) {
+        return -1;
+    }
+    *value = *(iomux_reg + pin);
+
+    return 0;
+}
+
+static inline int drv_fpioa_set_iomux(int pin, uint32_t value)
+{
+    if (NULL == mmap_iomux()) {
+        return -1;
+    }
+    *(iomux_reg + pin) = (*(iomux_reg + pin) & 0x200) | value;
+
+    return 0;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// PMU IOMUX //////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+static volatile uint32_t*      pmu_iomux_reg  = NULL;
+static struct utils_memory_map pmu_iomux_mmap = { .fd = -1, .base = NULL };
+
+static volatile uint32_t* mmap_pmu_iomux(void)
+{
+    if (NULL == pmu_iomux_reg) {
+        pmu_iomux_reg = utils_map_memory(&pmu_iomux_mmap, PMU_IOMUX_REG_ADDR);
+
+        if (pmu_iomux_reg == NULL) {
+            printf("[hal_fpioa]: mmap pmu_iomux failed\n");
+            return NULL;
+        }
+    }
+
+    return pmu_iomux_reg;
+}
+
+static inline int drv_fpioa_get_pmu_iomux(int pin, uint32_t* value)
+{
+    uint32_t data;
+
+    if (NULL == mmap_pmu_iomux()) {
+        return -1;
+    }
+
+    data   = *(pmu_iomux_reg + pin);
+    *value = convert_pmu_to_iomux(data);
+
+    return 0;
+}
+
+static inline int drv_fpioa_set_pmu_iomux(int pin, uint32_t value)
+{
+    uint32_t data;
+
+    if (NULL == mmap_pmu_iomux()) {
+        return -1;
+    }
+
+    data                   = convert_iomux_to_pmu(value);
+    *(pmu_iomux_reg + pin) = (*(pmu_iomux_reg + pin) & 0x200) | data;
+
+    return 0;
 }
 
 int drv_fpioa_get_pin_cfg(int pin, uint32_t* value)
 {
-    if (NULL == check_fpioa()) {
-        return -1;
+    if (64 > pin) {
+        return drv_fpioa_get_iomux(pin, value);
     }
-    *value = *(fpioa_reg + pin);
 
-    return 0;
+    return drv_fpioa_get_pmu_iomux(pin - 64, value);
 }
 
 int drv_fpioa_set_pin_cfg(int pin, uint32_t value)
 {
-    if (NULL == check_fpioa()) {
-        return -1;
+    if (64 > pin) {
+        return drv_fpioa_set_iomux(pin, value);
     }
-    *(fpioa_reg + pin) = (*(fpioa_reg + pin) & 0x200) | value;
 
-    return 0;
+    return drv_fpioa_set_pmu_iomux(pin - 64, value);
 }
 
 const fpioa_func_cfg_t* drv_fpioa_get_func_cfg(fpioa_func_t func)
 {
     static fpioa_func_cfg_t gpio_dft_cfg = { .func = GPIO0, .cfg = 0x18f, .name = "GPIO0" };
 
-    if (GPIO63 >= func) {
+    if (GPIO71 >= func) {
         return &gpio_dft_cfg;
     }
 
@@ -357,7 +500,7 @@ int drv_fpioa_set_pin_func(int pin, fpioa_func_t func)
     }
 
     /* if set pin to GPIO, we not check too strictly */
-    if ((GPIO63 >= func) && (GPIO0 <= func)) {
+    if ((GPIO71 >= func) && (GPIO0 <= func)) {
         found    = 1;
         func_sel = 0;
     }
@@ -449,7 +592,7 @@ int drv_fpioa_get_func_name(fpioa_func_t func, char* buf, size_t buf_size)
         return -1;
     }
 
-    if (GPIO63 >= func) {
+    if (GPIO71 >= func) {
         snprintf(buf, buf_size, "GPIO%d", func);
         return 0;
     }

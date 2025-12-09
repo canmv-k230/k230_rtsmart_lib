@@ -13,6 +13,7 @@ CINCS  := $(wildcard *.h)
 
 CFLAGS := -std=gnu99 -fopenmp -march=rv64imafdcv -mabi=lp64d -mcmodel=medany
 CFLAGS += -I.
+CFLAGS += -I$(SDK_RTSMART_SRC_DIR)/libs/rtsmart_hal/utils
 
 .PHONY: all clean distclean
 

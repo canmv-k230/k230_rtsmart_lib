@@ -30,7 +30,7 @@
 #include <stdio.h>
 
 #define FPIOA_PIN_MAX_FUNCS    (5)
-#define FPIOA_PIN_MAX_NUM      (64)
+#define FPIOA_PIN_MAX_NUM      (64 + 8)
 #define FPIOA_PIN_FUNC_ALT_NUM (4)
 
 #ifdef __cplusplus
@@ -102,6 +102,14 @@ typedef enum _fpioa_func {
     GPIO61,
     GPIO62,
     GPIO63,
+    GPIO64,
+    GPIO65,
+    GPIO66,
+    GPIO67,
+    GPIO68,
+    GPIO69,
+    GPIO70,
+    GPIO71,
     BOOT0,
     BOOT1,
     CI0,
@@ -227,6 +235,14 @@ typedef enum _fpioa_func {
     CTRL_IN_3D,
     CTRL_O1_3D,
     CTRL_O2_3D,
+    PMU_INT0,
+    PMU_INT1,
+    PMU_INT2,
+    PMU_INT3,
+    PMU_INT4,
+    PMU_INT5,
+    PMU_OUT0,
+    PMU_OUT1,
     TEST_PIN0,
     TEST_PIN1,
     TEST_PIN2,
