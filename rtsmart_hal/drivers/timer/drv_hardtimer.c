@@ -72,7 +72,7 @@ struct _drv_hard_timer_inst {
 
 static const int timer_inst_type = 0;
 
-static drv_hard_timer_inst_t* timer_in_use[KD_TIMER_MAX_NUM];
+static int timer_in_use[KD_TIMER_MAX_NUM] = {0, };
 
 static int drv_timer_open(int id)
 {
@@ -111,11 +111,8 @@ int drv_hard_timer_inst_create(int id, drv_hard_timer_inst_t** inst)
         return -1;
     }
 
-    // If timer already in use, return the existing instance
     if (timer_in_use[id]) {
-        printf("[hal_hdtimer]: timer%d already in use, returning existing instance\n", id);
-        *inst = timer_in_use[id];
-        return 0;
+        printf("[hal_hdtimer]: timer%d maybe in use\n", id);
     }
 
     if (*inst) {
@@ -143,7 +140,7 @@ int drv_hard_timer_inst_create(int id, drv_hard_timer_inst_t** inst)
     (*inst)->curr_period_ms = 1000; /* 1000ms */
     (*inst)->curr_freq_hz   = 12500 * 1000;
 
-    timer_in_use[id] = *inst;
+    timer_in_use[id] = 1;
 
     return 0;
 }
@@ -170,7 +167,7 @@ void drv_hard_timer_inst_destroy(drv_hard_timer_inst_t** inst)
     free(*inst);
     *inst = NULL;
 
-    timer_in_use[id] = NULL;
+    timer_in_use[id] = 0;
 
     return;
 }
