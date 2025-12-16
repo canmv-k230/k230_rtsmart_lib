@@ -7,7 +7,7 @@ if(CMAKE_VERSION VERSION_LESS "2.8.3")
    message(FATAL_ERROR "CMake >= 2.8.3 required")
 endif()
 cmake_policy(PUSH)
-cmake_policy(VERSION 2.8.3...3.24)
+cmake_policy(VERSION 2.8.3...3.26)
 #----------------------------------------------------------------
 # Generated CMake target import file.
 #----------------------------------------------------------------
@@ -59,7 +59,7 @@ endif()
 add_library(runtime_k230 INTERFACE IMPORTED)
 
 set_target_properties(runtime_k230 PROPERTIES
-  INTERFACE_LINK_DIRECTORIES "/home/zhangyang/workspace/kendryte/k230_sdk_release/src/big/mpp/userapps/lib;/home/zhangyang/workspace/kendryte/k230_sdk_release/src/big/rt-smart/userapps/sdk/lib/risc-v/rv64;/home/zhangyang/workspace/kendryte/k230_sdk_release/src/big/rt-smart/userapps/sdk/rt-thread/lib/risc-v/rv64"
+  INTERFACE_LINK_DIRECTORIES "/data/huochenghai/k230/k230_sdk_release/src/big/mpp/userapps/lib;/data/huochenghai/k230/k230_sdk_release/src/big/rt-smart/userapps/sdk/lib/risc-v/rv64;/data/huochenghai/k230/k230_sdk_release/src/big/rt-smart/userapps/sdk/rt-thread/lib/risc-v/rv64"
   INTERFACE_LINK_LIBRARIES "nncaseruntime;sys"
 )
 
