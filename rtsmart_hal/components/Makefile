@@ -1,6 +1,6 @@
 include ../../mkenv.mk
 
-subdirs-y := canmv_misc netmgmt k230_syscalls
+subdirs-y := canmv_misc netmgmt k230_syscalls k230_ota
 
 .PHONY: all clean distclean
 
