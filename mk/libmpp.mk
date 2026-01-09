@@ -3,6 +3,7 @@ lib_mpp_inc_dir := $(SDK_RTSMART_SRC_DIR)/mpp/include/
 lib_mpp_inc_dir += $(SDK_RTSMART_SRC_DIR)/mpp/include/comm
 lib_mpp_inc_dir += $(SDK_RTSMART_SRC_DIR)/mpp/include/ioctl
 lib_mpp_inc_dir += $(SDK_RTSMART_SRC_DIR)/mpp/userapps/api/
+lib_mpp_inc_dir += $(SDK_RTSMART_SRC_DIR)/mpp/userapps/api/framework/
 
 lib_mpp_lib_dir := $(SDK_RTSMART_SRC_DIR)/mpp/userapps/lib/
 lib_mpp_lib_dir += $(SDK_RTSMART_SRC_DIR)/mpp/middleware/lib/

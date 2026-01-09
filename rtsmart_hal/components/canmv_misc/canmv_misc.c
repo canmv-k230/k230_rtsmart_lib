@@ -218,3 +218,49 @@ int canmv_misc_delete_touch_device(int index)
 
     return 0;
 }
+
+int canmv_misc_get_mmz_zone_info(size_t* start, size_t* end)
+{
+    struct mmz_zone_info_t {
+        size_t mmz_start;
+        size_t mmz_end;
+    } info;
+
+    if (0x00 != canmv_misc_dev_ioctl(MISC_DEV_CMD_GET_MMZ_ZONE_INFO, &info)) {
+        return -1;
+    }
+
+    if (start) {
+        *start = info.mmz_start;
+    }
+
+    if (end) {
+        *end = info.mmz_end;
+    }
+
+    return 0;
+}
+
+bool canmv_misc_check_phys_in_mmz_zone(size_t addr, size_t size)
+{
+    static int    mmz_info_valid = 0;
+    static size_t mmz_start, mmz_end;
+
+    if (0x00 == mmz_info_valid) {
+        if (0x00 != canmv_misc_get_mmz_zone_info(&mmz_start, &mmz_end)) {
+            return false;
+        }
+
+        mmz_info_valid = 1;
+    }
+
+    if (addr < mmz_start) {
+        return false;
+    }
+
+    if ((addr + size) > mmz_end) {
+        return false;
+    }
+
+    return true;
+}
