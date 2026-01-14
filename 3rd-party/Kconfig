@@ -16,6 +16,13 @@ menu "RT-Smart 3rd-party Configuration"
             config RTSMART_3RD_PARTY_ENABLE_LVGL_EXAMPLES
                 bool "Enable LVGL Examples"
                 default n
+
+            config RTSMART_3RD_PARTY_ENABLE_LVGL_TESTS
+                bool "Enable Build Lvgl Test Programs"
+                depends on RTSMART_LIBS_ENABLE_TESTCASES
+                select RTSMART_COPY_LIBS_TEST
+                default n
+
         endif
 
     menuconfig RTSMART_3RD_PARTY_ENABLE_MBEDTLS
@@ -23,15 +30,25 @@ menu "RT-Smart 3rd-party Configuration"
         default y
 
         if RTSMART_3RD_PARTY_ENABLE_MBEDTLS
-
+            config RTSMART_3RD_PARTY_ENABLE_MBEDTLS_TESTS
+                bool "Enable Build MbedTLS Test Programs"
+                depends on RTSMART_LIBS_ENABLE_TESTCASES
+                select RTSMART_COPY_LIBS_TEST
+                default n
         endif
 
     menuconfig RTSMART_3RD_PARTY_ENABLE_MQTTCLIENT
-    bool "Enable Build MQTTClient"
-    default y
+        bool "Enable Build MQTTClient"
+        default y
 
-    if RTSMART_3RD_PARTY_ENABLE_MQTTCLIENT
-        source "$(SDK_RTSMART_SRC_DIR)/libs/3rd-party/mqttclient/Kconfig"
-    endif
+        if RTSMART_3RD_PARTY_ENABLE_MQTTCLIENT
+            source "$(SDK_RTSMART_SRC_DIR)/libs/3rd-party/mqttclient/Kconfig"
+
+            config RTSMART_LIBS_MQTTCLIENT_ENABLE_TESTS
+                bool "Enable Build RtSmart MQTT Client Tests"
+                depends on RTSMART_LIBS_ENABLE_TESTCASES
+                select RTSMART_COPY_LIBS_TEST
+                default n
+        endif
 
 endmenu

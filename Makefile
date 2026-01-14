@@ -3,9 +3,7 @@ include mkenv.mk
 subdirs-y := 
 
 ifndef RTT_LIBS_DISABLED
-subdirs-y += rtsmart_hal
-subdirs-y += 3rd-party
-subdirs-$(CONFIG_RTSMART_LIBS_ENABLE_TESTCASES) += testcases
+subdirs-y += rtsmart_hal 3rd-party
 endif
 
 .PHONY: all clean distclean

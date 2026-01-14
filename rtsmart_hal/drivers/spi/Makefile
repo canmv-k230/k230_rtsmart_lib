@@ -1,5 +1,5 @@
 include ../../../mkenv.mk
-include ../../../toolchain.mk
+include $(SDK_RTSMART_SRC_DIR)/libs/mk/toolchain_riscv64_musl.mk
 
 DIR = $(shell basename `pwd`)
 LIB = $(RTSMART_HAL_LIB_INSTALL_PATH)/lib$(DIR).a

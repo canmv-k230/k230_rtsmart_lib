@@ -7,6 +7,4 @@ menu "RT-Smart UserSpace Libraries Configuration"
     source "$(SDK_RTSMART_SRC_DIR)/libs/3rd-party/Kconfig"
     source "$(SDK_RTSMART_SRC_DIR)/libs/rtsmart_hal/Kconfig"
 
-    source "$(SDK_RTSMART_SRC_DIR)/libs/testcases/Kconfig"
-
 endmenu

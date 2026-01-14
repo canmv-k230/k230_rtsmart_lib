@@ -1,7 +1,6 @@
 include ../../mkenv.mk
-include ../../toolchain.mk
+include $(SDK_RTSMART_SRC_DIR)/libs/mk/toolchain_riscv64_musl.mk
 
-include $(SDK_SRC_ROOT_DIR)/.config
 include $(SDK_RTSMART_SRC_DIR)/libs/mk/librtsmart_hal.mk
 include $(SDK_RTSMART_SRC_DIR)/libs/mk/lib3rdparty.mk
 

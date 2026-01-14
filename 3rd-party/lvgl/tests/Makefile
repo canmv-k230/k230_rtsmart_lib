@@ -1,6 +1,6 @@
 # Include base configuration
 include ../../../mkenv.mk
-include ../../../toolchain.mk
+include $(SDK_RTSMART_SRC_DIR)/libs/mk/toolchain_riscv64_musl.mk
 
 # Build configuration
 BUILD =  $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/lvgl/tests/
