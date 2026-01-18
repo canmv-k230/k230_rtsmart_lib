@@ -90,7 +90,7 @@ example_dirs += ali baidu onenet
 # example_dirs += emqx
 
 .PHONY: all
-all: check_path $(LIB) build_example
+all: check_path build_inc_dir $(LIB) build_example
 	@echo "Make lib$(DIR) done."
 
 .PHONY: build_inc_dir
@@ -125,19 +125,15 @@ ifeq ($(CONFIG_RTSMART_LIBS_MQTTCLIENT_ENABLE_TESTS), y)
 	$(STRIP) $(ELF_OUTPUT_DIR)/mqtt_example_$(obj);)
 endif
 
-$(INC_STAMP):
-	@$(MAKE) build_inc_dir
-	@touch $@
-
 $(LIB): $(OBJS) 
 	@echo [LD] $@
 	$(Q)$(AR) rcs $@ $^
 
-$(COBJS) : $(BUILD)/%.o : %.c $(INC_STAMP)
+$(COBJS) : $(BUILD)/%.o : %.c
 	@echo [CC] $<
 	$(Q)$(CC) $(CFLAGS) -MD -MP -MF $@.d -c $< -o $@
 
-$(CXXOBJS) : $(BUILD)/%.o : %.cpp $(INC_STAMP)
+$(CXXOBJS) : $(BUILD)/%.o : %.cpp
 	@echo [CXX] $<
 	$(Q)$(CXX) $(CXXFLAGS) -MD -MP -MF $@.d -c $< -o $@
 
