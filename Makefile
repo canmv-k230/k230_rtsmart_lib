@@ -9,13 +9,25 @@ endif
 .PHONY: all clean distclean
 
 all:
-	@$(foreach dir,$(subdirs-y),$(MAKE) -C $(dir) all || exit $?;)
-	@echo "Make RT-Smart Libraries done."
+	@if [ -n "$(subdirs-y)" ]; then \
+		for dir in $(subdirs-y); do \
+			echo "[BUILD] rtsmart libs $$dir"; \
+			$(MAKE) -C $$dir all; \
+		done; \
+	fi
 
 clean:
-	@$(foreach dir,$(subdirs-y),$(MAKE) -C $(dir) clean || exit $?;)
-	@echo "Make RT-Smart Libraries clean done."
+	@if [ -n "$(subdirs-y)" ]; then \
+		for dir in $(subdirs-y); do \
+			echo "[CLEAN] rtsmart libs $$dir"; \
+			$(MAKE) -C $$dir clean; \
+		done; \
+	fi
 
 distclean:
-	@$(foreach dir,$(subdirs-y),$(MAKE) -C $(dir) distclean || exit $?;)
-	@echo "Make RT-Smart Libraries distclean done."
+	@if [ -n "$(subdirs-y)" ]; then \
+		for dir in $(subdirs-y); do \
+			echo "[DISTCLEAN] rtsmart libs $$dir"; \
+			$(MAKE) -C $$dir distclean; \
+		done; \
+	fi

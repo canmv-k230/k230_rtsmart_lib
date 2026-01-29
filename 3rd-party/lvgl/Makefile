@@ -49,62 +49,32 @@ CXXFILES    += $(filter-out $(CXXFILES_EXCLUDE), $(CXXFILES_ALL))
 
 COBJS	:= $(patsubst %, $(BUILD)/%, $(CFILES:.c=.o))
 CXXOBJS	:= $(patsubst %, $(BUILD)/%, $(CXXFILES:.cpp=.o))
-OBJS	:= $(COBJS) $(CXXOBJS)
 
-CDEPS	:= $(patsubst %, $(BUILD)/%, $(CFILES:.c=.o.d))
-CXXDEPS	:= $(patsubst %, $(BUILD)/%, $(CXXFILES:.cpp=.o.d))
-DEPS	:= $(CDEPS) $(CXXDEPS)
+OBJS	:= $(COBJS) $(CXXOBJS)
+DEPS    := $(OBJS:.o=.o.d)
+
+OBJ_DIRS := $(sort $(dir $(OBJS) $(LIB)))
 
 .PHONY: all
-all: check_path $(LIB)
-	@echo "Make LVGL wrap done."
-ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL_TESTS),y)
-	@$(MAKE) -C tests all
-endif
+all: $(LIB)
+	@$(ECHO) [BUILD] libs 3rd-party $(DIR) done.
 
-$(LIB): $(OBJS)
+$(LIB): $(OBJS) | $(OBJ_DIRS)
 	@echo [LD] $@
 	$(Q)$(AR) rcs $@ $^
 
-$(COBJS) : $(BUILD)/%.o : %.c
+$(COBJS) : $(BUILD)/%.o : %.c | $(OBJ_DIRS)
 	@echo [CC] $<
 	$(Q)$(CC) $(CFLAGS) -MD -MP -MF $@.d -c $< -o $@
 
-$(CXXOBJS) : $(BUILD)/%.o : %.cpp
+$(CXXOBJS) : $(BUILD)/%.o : %.cpp | $(OBJ_DIRS)
 	@echo [CXX] $<
 	$(Q)$(CXX) $(CXXFLAGS) -MD -MP -MF $@.d -c $< -o $@
 
 .PHONY: clean
 clean:
 	@rm -rf $(LIB) $(OBJS) $(DEPS)
-ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL_TESTS),y)
-	@$(MAKE) -C tests clean
-endif
 
-.PHONY: check_path
-check_path:
-	@if [ -z "$(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)" ]; then \
-		echo "Error: RTSMART_3RD_PARTY_LIB_INSTALL_PATH is not set"; \
-		exit 1; \
-	fi
-	@if [ ! -d "$(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)" ]; then \
-		mkdir -p "$(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)"; \
-	fi
-	@if [ -z "$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)" ]; then \
-		echo "Error: RTSMART_3RD_PARTY_INC_INSTALL_PATH is not set"; \
-		exit 1; \
-	fi
-	@if [ ! -d "$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)" ]; then \
-		mkdir -p "$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)"; \
-	fi
-
-# $(sort $(var)) removes duplicates
-#
-# The net effect of this, is it causes the objects to depend on the
-# object directories (but only for existence), and the object directories
-# will be created if they don't exist.
-OBJ_DIRS = $(sort $(dir $(OBJS)))
-$(OBJS): | $(OBJ_DIRS)
 $(OBJ_DIRS):
 	@$(MKDIR) -p $@
 

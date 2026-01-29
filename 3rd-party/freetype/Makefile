@@ -72,11 +72,11 @@ CXXFILES    += $(filter-out $(CXXFILES_EXCLUDE), $(CXXFILES_ALL))
 
 COBJS	      := $(patsubst %, $(BUILD)/%, $(CFILES:.c=.o))
 CXXOBJS	:= $(patsubst %, $(BUILD)/%, $(CXXFILES:.cpp=.o))
-OBJS	      := $(COBJS) $(CXXOBJS)
 
-CDEPS	      := $(patsubst %, $(BUILD)/%, $(CFILES:.c=.o.d))
-CXXDEPS	:= $(patsubst %, $(BUILD)/%, $(CXXFILES:.cpp=.o.d))
-DEPS	      := $(CDEPS) $(CXXDEPS)
+OBJS  := $(COBJS) $(CXXOBJS)
+DEPS  := $(OBJS:.o=.o.d)
+
+OBJ_DIRS := $(sort $(dir $(OBJS) $(LIB)))
 
 .PHONY: check_path
 check_path:
@@ -100,17 +100,17 @@ all: check_path $(LIB)
 	@cp -rp $(LOCAL_SRC_DIR)/freetype/include/freetype $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
 	@cp -rp $(LOCAL_SRC_DIR)/freetype/include/ft2build.h $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
 	@cp -rp freetype_wrap.h $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
-	@echo "Make lib$(DIR) done."
+	@$(ECHO) [BUILD] libs 3rd-party $(DIR) done.
 
-$(LIB): $(OBJS) 
+$(LIB): $(OBJS) | $(OBJ_DIRS)
 	@echo [LD] $@
 	@$(AR) rcs $@ $^
 
-$(COBJS) : $(BUILD)/%.o : %.c
+$(COBJS) : $(BUILD)/%.o : %.c | $(OBJ_DIRS)
 	@echo [CC] $<
 	$(Q)$(CC) $(CFLAGS) -MD -MP -MF $@.d -c $< -o $@
 
-$(CXXOBJS) : $(BUILD)/%.o : %.cpp
+$(CXXOBJS) : $(BUILD)/%.o : %.cpp | $(OBJ_DIRS)
 	@echo [AS] $<
 	$(Q)$(CXX) $(CXXFLAGS) -MD -MP -MF $@.d -c $< -o $@
 
@@ -118,13 +118,6 @@ $(CXXOBJS) : $(BUILD)/%.o : %.cpp
 clean:
 	@rm -rf $(LIB) $(OBJS) $(DEPS)
 
-# $(sort $(var)) removes duplicates
-#
-# The net effect of this, is it causes the objects to depend on the
-# object directories (but only for existence), and the object directories
-# will be created if they don't exist.
-OBJ_DIRS = $(sort $(dir $(OBJS)))
-$(OBJS): | $(OBJ_DIRS)
 $(OBJ_DIRS):
 	@$(MKDIR) -p $@
 

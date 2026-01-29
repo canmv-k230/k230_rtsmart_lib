@@ -4,14 +4,29 @@ subdirs-y := canmv_misc netmgmt k230_syscalls k230_ota
 
 .PHONY: all clean distclean
 
-all:
-	@$(foreach dir,$(subdirs-y),$(MAKE) -C $(dir) all || exit $?;)
-	@echo "Make RT-Smart Hal Components done."
+all: $(subdirs-y)
+	@$(ECHO) [BUILD] libs rtsmart hal components done.
+
+ifneq ($(strip $(subdirs-y)),)
+.PHONY: $(subdirs-y)
+
+$(subdirs-y):
+	@echo "[BUILD] rtsmart libs hal $@"
+	@$(MAKE) -C $@ all || exit $?;
+endif
 
 clean:
-	@$(foreach dir,$(subdirs-y),$(MAKE) -C $(dir) clean || exit $?;)
-	@echo "Make RT-Smart Hal Components clean done."
+	@if [ -n "$(subdirs-y)" ]; then \
+		for dir in $(subdirs-y); do \
+			echo "[CLEAN] rtsmart libs hal $$dir"; \
+			$(MAKE) -C $$dir clean || exit $?; \
+		done; \
+	fi
 
 distclean: clean
-	@$(foreach dir,$(subdirs-y),$(MAKE) -C $(dir) distclean || exit $?;)
-	@echo "Make RT-Smart Hal Components distclean done."
+	@if [ -n "$(subdirs-y)" ]; then \
+		for dir in $(subdirs-y); do \
+			echo "[DISTCLEAN] rtsmart libs hal $$dir"; \
+			$(MAKE) -C $$dir distclean || exit $?; \
+		done; \
+	fi

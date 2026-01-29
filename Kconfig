@@ -1,9 +1,5 @@
 menu "RT-Smart UserSpace Libraries Configuration"
 
-    config RTSMART_COPY_LIBS_TEST
-        bool
-        default n
-
     source "$(SDK_RTSMART_SRC_DIR)/libs/3rd-party/Kconfig"
     source "$(SDK_RTSMART_SRC_DIR)/libs/rtsmart_hal/Kconfig"
 

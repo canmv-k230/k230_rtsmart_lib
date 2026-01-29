@@ -6,17 +6,33 @@ subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_FREETYPE) += freetype
 subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL) += lvgl
 subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS) += mbedtls
 subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_MQTTCLIENT) += mqttclient
+subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_MINIHTTP) += minihttp
 
 .PHONY: all clean distclean
 
-all:
-	@$(foreach dir,$(subdirs-y),$(MAKE) -C $(dir) all || exit $?;)
-	@echo "Make RT-Smart 3rd-party done."
+all: $(subdirs-y)
+	@$(ECHO) [BUILD] libs 3rd-party done.
+
+ifneq ($(strip $(subdirs-y)),)
+.PHONY: $(subdirs-y)
+
+$(subdirs-y):
+	@echo "[BUILD] rtsmart libs 3rd-party $@"
+	@$(MAKE) -C $@ all || exit $?;
+endif
 
 clean:
-	@$(foreach dir,$(subdirs-y),$(MAKE) -C $(dir) clean || exit $?;)
-	@echo "Make RT-Smart 3rd-party clean done."
+	@if [ -n "$(subdirs-y)" ]; then \
+		for dir in $(subdirs-y); do \
+			echo "[CLEAN] rtsmart libs 3rd-party $$dir"; \
+			$(MAKE) -C $$dir clean || exit $?; \
+		done; \
+	fi
 
 distclean:
-	@$(foreach dir,$(subdirs-y),$(MAKE) -C $(dir) distclean || exit $?;)
-	@echo "Make RT-Smart 3rd-party distclean done."
+	@if [ -n "$(subdirs-y)" ]; then \
+		for dir in $(subdirs-y); do \
+			echo "[DISTCLEAN] rtsmart libs 3rd-party $$dir"; \
+			$(MAKE) -C $$dir distclean || exit $?; \
+		done; \
+	fi

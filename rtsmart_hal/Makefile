@@ -4,15 +4,30 @@ subdirs-y := drivers components utils
 
 .PHONY: all clean distclean
 
-all:
-	@$(foreach dir,$(subdirs-y),$(MAKE) -C $(dir) all || exit $?;)
-	@echo "Make RT-Smart Hal done."
+all: $(subdirs-y)
+	@$(ECHO) [BUILD] libs rtsmart hal done.
+
+ifneq ($(strip $(subdirs-y)),)
+.PHONY: $(subdirs-y)
+
+$(subdirs-y):
+	@echo "[BUILD] rtsmart libs hal $@"
+	@$(MAKE) -C $@ all || exit $?;
+endif
 
 clean:
-	@$(foreach dir,$(subdirs-y),$(MAKE) -C $(dir) clean || exit $?;)
+	@if [ -n "$(subdirs-y)" ]; then \
+		for dir in $(subdirs-y); do \
+			echo "[CLEAN] rtsmart libs hal $$dir"; \
+			$(MAKE) -C $$dir clean || exit $?; \
+		done; \
+	fi
 	@$(RM) $(RTSMART_HAL_LIB_INSTALL_PATH) $(RTSMART_HAL_INC_INSTALL_PATH)
-	@echo "Make RT-Smart Hal clean done."
 
 distclean:
-	@$(foreach dir,$(subdirs-y),$(MAKE) -C $(dir) distclean || exit $?;)
-	@echo "Make RT-Smart Hal distclean done."
+	@if [ -n "$(subdirs-y)" ]; then \
+		for dir in $(subdirs-y); do \
+			echo "[DISTCLEAN] rtsmart libs hal $$dir"; \
+			$(MAKE) -C $$dir distclean || exit $?; \
+		done; \
+	fi

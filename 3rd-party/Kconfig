@@ -1,12 +1,8 @@
 menu "RT-Smart 3rd-party Configuration"
 
-    menuconfig RTSMART_3RD_PARTY_ENABLE_FREETYPE
+    config RTSMART_3RD_PARTY_ENABLE_FREETYPE
         bool "Enable Build FreeType"
         default y
-
-        if RTSMART_3RD_PARTY_ENABLE_FREETYPE
-
-        endif
 
     menuconfig RTSMART_3RD_PARTY_ENABLE_LVGL
         bool "Enable Build LVGL"
@@ -16,26 +12,11 @@ menu "RT-Smart 3rd-party Configuration"
             config RTSMART_3RD_PARTY_ENABLE_LVGL_EXAMPLES
                 bool "Enable LVGL Examples"
                 default n
-
-            config RTSMART_3RD_PARTY_ENABLE_LVGL_TESTS
-                bool "Enable Build Lvgl Test Programs"
-                depends on RTSMART_LIBS_ENABLE_TESTCASES
-                select RTSMART_COPY_LIBS_TEST
-                default n
-
         endif
 
-    menuconfig RTSMART_3RD_PARTY_ENABLE_MBEDTLS
+    config RTSMART_3RD_PARTY_ENABLE_MBEDTLS
         bool "Enable Build MbedTLS"
         default y
-
-        if RTSMART_3RD_PARTY_ENABLE_MBEDTLS
-            config RTSMART_3RD_PARTY_ENABLE_MBEDTLS_TESTS
-                bool "Enable Build MbedTLS Test Programs"
-                depends on RTSMART_LIBS_ENABLE_TESTCASES
-                select RTSMART_COPY_LIBS_TEST
-                default n
-        endif
 
     menuconfig RTSMART_3RD_PARTY_ENABLE_MQTTCLIENT
         bool "Enable Build MQTTClient"
@@ -43,12 +24,16 @@ menu "RT-Smart 3rd-party Configuration"
 
         if RTSMART_3RD_PARTY_ENABLE_MQTTCLIENT
             source "$(SDK_RTSMART_SRC_DIR)/libs/3rd-party/mqttclient/Kconfig"
+        endif
 
-            config RTSMART_LIBS_MQTTCLIENT_ENABLE_TESTS
-                bool "Enable Build RtSmart MQTT Client Tests"
-                depends on RTSMART_LIBS_ENABLE_TESTCASES
-                select RTSMART_COPY_LIBS_TEST
-                default n
+    menuconfig RTSMART_3RD_PARTY_ENABLE_MINIHTTP
+        bool "Enable Build miniHTTP"
+        default n
+
+        if RTSMART_3RD_PARTY_ENABLE_MINIHTTP
+            config MINIHTTP_USE_MBEDTLS
+                bool "Enable miniHTTP MbedTLS Support"
+                default y if RTSMART_3RD_PARTY_ENABLE_MBEDTLS
         endif
 
 endmenu

@@ -30,10 +30,9 @@ extern "C" {
 
 #include "src/display/lv_display.h"
 
-#include "mpi_connector_api.h"
-#include "mpi_vo_api.h"
+#include "kd_display.h"
 
-lv_display_t* lv_k230_display_create(k_connector_type connector_type, k_vo_osd layer);
+lv_display_t* lv_k230_display_create(k_vo_layer_id layer);
 
 #ifdef __cplusplus
 } /*extern "C"*/

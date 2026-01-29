@@ -36,11 +36,11 @@ CXXFILES    += $(filter-out $(CXXFILES_EXCLUDE), $(CXXFILES_ALL))
 
 COBJS	:= $(patsubst %, $(BUILD)/%, $(CFILES:.c=.o))
 CXXOBJS	:= $(patsubst %, $(BUILD)/%, $(CXXFILES:.cpp=.o))
-OBJS	:= $(COBJS) $(CXXOBJS)
 
-CDEPS	:= $(patsubst %, $(BUILD)/%, $(CFILES:.c=.o.d))
-CXXDEPS	:= $(patsubst %, $(BUILD)/%, $(CXXFILES:.cpp=.o.d))
-DEPS	:= $(CDEPS) $(CXXDEPS)
+OBJS	:= $(COBJS) $(CXXOBJS)
+DEPS    := $(OBJS:.o=.o.d)
+
+OBJ_DIRS := $(sort $(dir $(OBJS) $(LIB)))
 
 CFLAGS_MBEDTLS := -march=rv64imafdcv -mabi=lp64d -mcmodel=medany -Os -n --static
 CFLAGS_MBEDTLS += -DMBEDTLS_USER_CONFIG_FILE=\"mbedtls_port_config.h\"
@@ -81,27 +81,27 @@ all: check_path $(LIB) mbedtls_library mbedtls_tests
 	@cp -rp port/*.h $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
 
 ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS_TESTS),y)
-	@mkdir -p $(RTSMART_LIBS_ELF_INSTALL_PATH)
+	@mkdir -p $(RTSMART_LIBS_3RD_PARTY_ELF_INSTALL_PATH)
 	@for p in mbedtls/programs/*/* ; do						\
 	    if [ -x $$p ] && [ ! -d $$p ] ;     				\
 	    then                                				\
 	        f=mbedtls_`basename $$p` ;     					\
-	        cp $$p $(RTSMART_LIBS_ELF_INSTALL_PATH)/$$f ;	\
+	        cp $$p $(RTSMART_LIBS_3RD_PARTY_ELF_INSTALL_PATH)/$$f ;	\
 	    fi                                  				\
 	done
 endif
 
-	@echo "Make mbedtls wrap done."
+	@$(ECHO) [BUILD] libs 3rd-party $(DIR) done.
 
-$(LIB): $(OBJS) 
+$(LIB): $(OBJS) | $(OBJ_DIRS)
 	@echo [LD] $@
 	$(Q)$(AR) rcs $@ $^
 
-$(COBJS) : $(BUILD)/%.o : %.c
+$(COBJS) : $(BUILD)/%.o : %.c | $(OBJ_DIRS)
 	@echo [CC] $<
 	$(Q)$(CC) $(CFLAGS) -MD -MP -MF $@.d -c $< -o $@
 
-$(CXXOBJS) : $(BUILD)/%.o : %.cpp
+$(CXXOBJS) : $(BUILD)/%.o : %.cpp | $(OBJ_DIRS)
 	@echo [AS] $<
 	$(Q)$(CXX) $(CXXFLAGS) -MD -MP -MF $@.d -c $< -o $@
 
@@ -127,13 +127,6 @@ check_path:
 		mkdir -p "$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)"; \
 	fi
 
-# $(sort $(var)) removes duplicates
-#
-# The net effect of this, is it causes the objects to depend on the
-# object directories (but only for existence), and the object directories
-# will be created if they don't exist.
-OBJ_DIRS = $(sort $(dir $(OBJS)))
-$(OBJS): | $(OBJ_DIRS)
 $(OBJ_DIRS):
 	@$(MKDIR) -p $@
 

@@ -1,3 +1,5 @@
+.NOTPARALLEL:
+
 include ../../mkenv.mk
 include $(SDK_RTSMART_SRC_DIR)/libs/mk/toolchain_riscv64_musl.mk
 
@@ -8,7 +10,6 @@ DIR = $(shell basename `pwd`)
 LOCAL_SRC_DIR = mqttclient
 LIB = $(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)/lib$(DIR).a
 BUILD =  $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/mqttclient
-INC_STAMP := $(BUILD)/.inc_built
 
 MQTT_PLATFORM = linux
 
@@ -66,15 +67,15 @@ CXXFILES_ALL      = $(foreach dir, $(SRC_DIRS), $(wildcard $(dir)/*.cpp))
 CFILES      += $(filter-out $(CFILES_EXCLUDE), $(CFILES_ALL))
 CXXFILES    += $(filter-out $(CXXFILES_EXCLUDE), $(CXXFILES_ALL))
 
-COBJS	      := $(patsubst %, $(BUILD)/%, $(CFILES:.c=.o))
+COBJS		:= $(patsubst %, $(BUILD)/%, $(CFILES:.c=.o))
 CXXOBJS		:= $(patsubst %, $(BUILD)/%, $(CXXFILES:.cpp=.o))
-OBJS	      := $(COBJS) $(CXXOBJS)
 
-CDEPS	      := $(patsubst %, $(BUILD)/%, $(CFILES:.c=.o.d))
-CXXDEPS		:= $(patsubst %, $(BUILD)/%, $(CXXFILES:.cpp=.o.d))
-DEPS	      := $(CDEPS) $(CXXDEPS)
+OBJS	:= $(COBJS) $(CXXOBJS)
+DEPS    := $(OBJS:.o=.o.d)
 
-ELF_OUTPUT_DIR := $(RTSMART_LIBS_ELF_INSTALL_PATH)
+OBJ_DIRS := $(sort $(dir $(OBJS) $(LIB)))
+
+ELF_OUTPUT_DIR := $(RTSMART_LIBS_3RD_PARTY_ELF_INSTALL_PATH)
 
 MQTT_EXAMPLE_CFLAGS := -march=rv64imafdcv -mabi=lp64d -mcmodel=medany
 MQTT_EXAMPLE_CFLAGS += -std=gnu99 -fdata-sections -ffunction-sections
@@ -89,12 +90,13 @@ example_dirs :=
 example_dirs += ali baidu onenet
 # example_dirs += emqx
 
-.PHONY: all
-all: check_path build_inc_dir $(LIB) build_example
-	@echo "Make lib$(DIR) done."
+PREPARE_STAMP := $(BUILD)/.prepare_done
 
-.PHONY: build_inc_dir
-build_inc_dir:
+.PHONY: all
+all: check_path $(PREPARE_STAMP) $(LIB) build_example
+	@$(ECHO) [BUILD] libs 3rd-party $(DIR) done.
+
+$(PREPARE_STAMP): | $(OBJ_DIRS)
 	@mkdir -p $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/mqttclient/
 
 	@cp -rp $(wildcard $(LOCAL_SRC_DIR)/common/*.h) $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/mqttclient/
@@ -118,28 +120,28 @@ endif
 .PHONY: build_example
 build_example: check_path $(LIB)
 ifeq ($(CONFIG_RTSMART_LIBS_MQTTCLIENT_ENABLE_TESTS), y)
-	@mkdir -p $(RTSMART_LIBS_ELF_INSTALL_PATH)
+	@mkdir -p $(RTSMART_LIBS_3RD_PARTY_ELF_INSTALL_PATH)
 	@$(foreach obj,$(example_dirs),\
 	echo [LD] mqtt_example_$(obj) &&\
 	$(CC) $(MQTT_EXAMPLE_CFLAGS) $(patsubst %.c, $(BUILD)/%.o, $(wildcard $(LOCAL_SRC_DIR)/example/$(obj)/$(obj).c)) -o $(ELF_OUTPUT_DIR)/mqtt_example_$(obj) $(LIB) $(LDFLAGS) &&\
 	$(STRIP) $(ELF_OUTPUT_DIR)/mqtt_example_$(obj);)
 endif
 
-$(LIB): $(OBJS) 
+$(LIB): $(OBJS) | $(OBJ_DIRS)
 	@echo [LD] $@
 	$(Q)$(AR) rcs $@ $^
 
-$(COBJS) : $(BUILD)/%.o : %.c
+$(COBJS) : $(BUILD)/%.o : %.c | $(OBJ_DIRS)
 	@echo [CC] $<
 	$(Q)$(CC) $(CFLAGS) -MD -MP -MF $@.d -c $< -o $@
 
-$(CXXOBJS) : $(BUILD)/%.o : %.cpp
+$(CXXOBJS) : $(BUILD)/%.o : %.cpp | $(OBJ_DIRS)
 	@echo [CXX] $<
 	$(Q)$(CXX) $(CXXFLAGS) -MD -MP -MF $@.d -c $< -o $@
 
 .PHONY: clean
 clean:
-	@rm -rf $(LIB) $(OBJS) $(DEPS) $(INC_STAMP)
+	@rm -rf $(LIB) $(OBJS) $(DEPS) $(PREPARE_STAMP)
 
 .PHONY: check_path
 check_path:
@@ -158,13 +160,6 @@ check_path:
 		mkdir -p "$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)"; \
 	fi
 
-# $(sort $(var)) removes duplicates
-#
-# The net effect of this, is it causes the objects to depend on the
-# object directories (but only for existence), and the object directories
-# will be created if they don't exist.
-OBJ_DIRS = $(sort $(dir $(OBJS)))
-$(OBJS): | $(OBJ_DIRS)
 $(OBJ_DIRS):
 	@echo [MKDIR] $@
 	@$(MKDIR) -p $@
