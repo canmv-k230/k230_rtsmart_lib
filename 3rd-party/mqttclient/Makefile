@@ -120,7 +120,7 @@ endif
 .PHONY: build_example
 build_example: check_path $(LIB)
 ifeq ($(CONFIG_RTSMART_LIBS_MQTTCLIENT_ENABLE_TESTS), y)
-	@mkdir -p $(RTSMART_LIBS_3RD_PARTY_ELF_INSTALL_PATH)
+	@mkdir -p $(ELF_OUTPUT_DIR)
 	@$(foreach obj,$(example_dirs),\
 	echo [LD] mqtt_example_$(obj) &&\
 	$(CC) $(MQTT_EXAMPLE_CFLAGS) $(patsubst %.c, $(BUILD)/%.o, $(wildcard $(LOCAL_SRC_DIR)/example/$(obj)/$(obj).c)) -o $(ELF_OUTPUT_DIR)/mqtt_example_$(obj) $(LIB) $(LDFLAGS) &&\
