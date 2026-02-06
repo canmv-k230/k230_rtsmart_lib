@@ -444,7 +444,7 @@ static void event_cb(lv_event_t* e)
             }
 
             // Reconfigure OSD for new color format
-            if (kd_display_layer_set_pixel_format(layer_id, new_pixel_format) != 0) {
+            if (kd_display_layer_update_pixel_format(layer_id, new_pixel_format) != 0) {
                 printf("Failed to reconfigure OSD for new color format\n");
                 // Rollback: reconfigure buffers back to old format
                 inst->color_format                = old_color_format;

@@ -81,12 +81,12 @@ all: check_path $(LIB) mbedtls_library mbedtls_tests
 	@cp -rp port/*.h $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
 
 ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS_TESTS),y)
-	@mkdir -p $(RTSMART_LIBS_3RD_PARTY_ELF_INSTALL_PATH)
+	@mkdir -p $(RTSMART_LIBS_3RD_PARTY_ELF_INSTALL_PATH)/mbedtls/
 	@for p in mbedtls/programs/*/* ; do						\
 	    if [ -x $$p ] && [ ! -d $$p ] ;     				\
 	    then                                				\
 	        f=mbedtls_`basename $$p` ;     					\
-	        cp $$p $(RTSMART_LIBS_3RD_PARTY_ELF_INSTALL_PATH)/$$f ;	\
+	        cp $$p $(RTSMART_LIBS_3RD_PARTY_ELF_INSTALL_PATH)/mbedtls/$$f ;	\
 	    fi                                  				\
 	done
 endif

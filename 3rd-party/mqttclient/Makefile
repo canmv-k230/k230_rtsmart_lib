@@ -75,7 +75,7 @@ DEPS    := $(OBJS:.o=.o.d)
 
 OBJ_DIRS := $(sort $(dir $(OBJS) $(LIB)))
 
-ELF_OUTPUT_DIR := $(RTSMART_LIBS_3RD_PARTY_ELF_INSTALL_PATH)
+ELF_OUTPUT_DIR := $(RTSMART_LIBS_3RD_PARTY_ELF_INSTALL_PATH)/mqtt/
 
 MQTT_EXAMPLE_CFLAGS := -march=rv64imafdcv -mabi=lp64d -mcmodel=medany
 MQTT_EXAMPLE_CFLAGS += -std=gnu99 -fdata-sections -ffunction-sections
