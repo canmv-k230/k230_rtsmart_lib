@@ -7,6 +7,7 @@ subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL) += lvgl
 subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS) += mbedtls
 subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_MQTTCLIENT) += mqttclient
 subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_MINIHTTP) += minihttp
+subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_TUYALINKSDK) += tuya-iot-core-sdk
 
 .PHONY: all clean distclean
 

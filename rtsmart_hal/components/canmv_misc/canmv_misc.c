@@ -264,3 +264,43 @@ bool canmv_misc_check_phys_in_mmz_zone(size_t addr, size_t size)
 
     return true;
 }
+
+/**
+ * userspace function to get kernel build info
+ * @param out_buf: buffer to store the version string
+ * @param buf_len: size of out_buf
+ * @return: 0 on success, -1 on failure
+ */
+int canmv_misc_get_kernel_build_info(char* out_buf, size_t buf_len)
+{
+#define INFO_MAX_LEN (256)
+
+    struct kernel_build_info_t {
+        int  len;
+        char info[0];
+    };
+
+    size_t alloc_size = sizeof(struct kernel_build_info_t) + INFO_MAX_LEN;
+
+    struct kernel_build_info_t* k_info = (struct kernel_build_info_t*)malloc(alloc_size);
+
+    if (!k_info) {
+        return -1;
+    }
+
+    if (0x00 != canmv_misc_dev_ioctl(MISC_DEV_CMD_GET_KERNEL_BUILD_INFO, k_info)) {
+        free(k_info);
+        return -1;
+    }
+
+    if (out_buf && buf_len > 0) {
+        size_t copy_len = (k_info->len < (int)buf_len) ? k_info->len : (buf_len - 1);
+        memcpy(out_buf, k_info->info, copy_len);
+        out_buf[copy_len] = '\0';
+    }
+
+    free(k_info);
+    return 0;
+
+#undef INFO_MAX_LEN
+}

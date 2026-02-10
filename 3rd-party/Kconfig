@@ -36,4 +36,12 @@ menu "RT-Smart 3rd-party Configuration"
                 default y if RTSMART_3RD_PARTY_ENABLE_MBEDTLS
         endif
 
+    menuconfig RTSMART_3RD_PARTY_ENABLE_TUYALINKSDK
+        bool "Enable Build Tuya IoT Core SDK"
+        default n
+        select RTSMART_3RD_PARTY_ENABLE_MBEDTLS
+
+        if RTSMART_3RD_PARTY_ENABLE_TUYALINKSDK
+            
+        endif
 endmenu

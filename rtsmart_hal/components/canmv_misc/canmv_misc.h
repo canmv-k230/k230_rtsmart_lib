@@ -54,6 +54,7 @@
 #define MISC_DEV_CMD_REGISTER_TOUCH_DEVICE   _IOWR('M', 0x10, void*)
 #define MISC_DEV_CMD_UNREGISTER_TOUCH_DEVICE _IOWR('M', 0x11, void*)
 #define MISC_DEV_CMD_GET_MMZ_ZONE_INFO       _IOWR('M', 0x12, void*)
+#define MISC_DEV_CMD_GET_KERNEL_BUILD_INFO    _IOWR('M', 0x13, void *)
 
 #ifdef __cplusplus
 extern "C" {
@@ -167,6 +168,8 @@ int canmv_misc_delete_touch_device(int index);
 int canmv_misc_get_mmz_zone_info(size_t* start, size_t* end);
 
 bool canmv_misc_check_phys_in_mmz_zone(size_t addr, size_t size);
+
+int canmv_misc_get_kernel_build_info(char* out_buf, size_t buf_len);
 
 #ifdef __cplusplus
 }
