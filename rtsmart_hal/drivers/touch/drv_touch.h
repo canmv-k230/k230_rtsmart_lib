@@ -141,7 +141,13 @@ int drv_touch_get_config(drv_touch_inst_t* inst, struct drv_touch_config_t* cfg)
 
 /* Helper macros for getting instance attributes */
 #ifndef MEMBER_TYPE
-#define MEMBER_TYPE(struct_type, member) typeof(((struct_type*)0)->member)
+#  ifdef __cplusplus
+     // C++ equivalent
+#    define MEMBER_TYPE(struct_type, member) decltype(((struct_type*)0)->member)
+#  else
+     // C extension
+#    define MEMBER_TYPE(struct_type, member) typeof(((struct_type*)0)->member)
+#  endif
 #endif
 
 #define DRV_TOUCH_GET_ATTR_TEMPLATE(struct_type, member)                                                                       \

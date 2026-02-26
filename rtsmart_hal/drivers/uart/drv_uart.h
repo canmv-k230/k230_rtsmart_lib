@@ -100,7 +100,13 @@ int drv_uart_set_config(drv_uart_inst_t* inst, struct uart_configure* cfg);
 int drv_uart_get_config(drv_uart_inst_t* inst, struct uart_configure* cfg);
 
 #ifndef MEMBER_TYPE
-#define MEMBER_TYPE(struct_type, member) typeof(((struct_type*)0)->member)
+#  ifdef __cplusplus
+     // C++ equivalent
+#    define MEMBER_TYPE(struct_type, member) decltype(((struct_type*)0)->member)
+#  else
+     // C extension
+#    define MEMBER_TYPE(struct_type, member) typeof(((struct_type*)0)->member)
+#  endif
 #endif
 
 #define DRV_UART_GET_ATTR_TEMPLATE(struct_type, member)                                                                        \

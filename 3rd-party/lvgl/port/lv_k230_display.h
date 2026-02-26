@@ -28,11 +28,13 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+
 #include "src/display/lv_display.h"
 
 #include "kd_display.h"
 
-lv_display_t* lv_k230_display_create(k_vo_layer_id layer);
+lv_display_t* lv_k230_display_create(k_vo_layer_id layer, uint8_t alpha);
 
 #ifdef __cplusplus
 } /*extern "C"*/

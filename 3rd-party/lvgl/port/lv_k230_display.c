@@ -66,7 +66,8 @@ static k_pixel_format lv_k230_map_color_format_to_pixel_format(lv_color_format_t
         return PIXEL_FORMAT_RGB_888;
     case LV_COLOR_FORMAT_ARGB8888:
     case LV_COLOR_FORMAT_XRGB8888:
-        return PIXEL_FORMAT_ARGB_8888;
+        // return PIXEL_FORMAT_ARGB_8888;
+        return PIXEL_FORMAT_BGRA_8888;
     default:
         printf("Unsupported color format %d\n", color_format);
 
@@ -86,6 +87,7 @@ static k_u8 lv_k230_osd_layer_pixel_fmt_bpp(lv_k230_display_intstance_t* inst)
         bpp = 3;
         break;
     case PIXEL_FORMAT_ARGB_8888:
+    case PIXEL_FORMAT_BGRA_8888:
         bpp = 4;
         break;
     default:
@@ -463,7 +465,7 @@ static void event_cb(lv_event_t* e)
     }
 }
 
-lv_display_t* lv_k230_display_create(k_vo_layer_id layer)
+lv_display_t* lv_k230_display_create(k_vo_layer_id layer, uint8_t alpha)
 {
     k_s32 ret;
 
@@ -512,7 +514,7 @@ lv_display_t* lv_k230_display_create(k_vo_layer_id layer)
     inst->osd_layer_attr.img_size.width  = panel_width;
     inst->osd_layer_attr.img_size.height = panel_height;
     inst->osd_layer_attr.pixel_format    = osd_layer_pixel_fmt;
-    inst->osd_layer_attr.global_alpha    = 0xFF; // user can modify?
+    inst->osd_layer_attr.global_alpha    = alpha;
     inst->osd_layer_attr.func            = 0; // default no rotate.
     inst->osd_layer_attr.rot_buf_nr      = 2;
     inst->osd_layer_attr.rot_buf_bpp     = 4; // we need support user dynamic update pixelformat
