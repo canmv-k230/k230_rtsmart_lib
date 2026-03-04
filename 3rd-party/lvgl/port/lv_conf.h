@@ -22,12 +22,18 @@
 #include "my_include.h"
 #endif
 
+#include "generated/autoconf.h"
+
+#ifndef CONFIG_RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH
+#define CONFIG_RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH 32
+#endif
+
 /*====================
    COLOR SETTINGS
  *====================*/
 
 /** Color depth: 1 (I1), 8 (L8), 16 (RGB565), 24 (RGB888), 32 (XRGB8888) */
-#define LV_COLOR_DEPTH 32
+#define LV_COLOR_DEPTH CONFIG_RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH
 
 /*=========================
    STDLIB WRAPPER SETTINGS

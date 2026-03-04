@@ -26,7 +26,8 @@ CWARN :=
 # CWARN += -Wall -Werror
 # CWARN += -Wno-int-conversion
 
-C_CXX_FLAGS := -Iport -Ilvgl -fopenmp -march=rv64imafdcv -mabi=lp64d -mcmodel=medany -Os $(CWARN) $(LIB_CFLAGS)
+C_CXX_FLAGS := -Iport -Ilvgl -I$(SDK_SRC_ROOT_DIR)/include 
+C_CXX_FLAGS += -fopenmp -march=rv64imafdcv -mabi=lp64d -mcmodel=medany -Os $(CWARN) $(LIB_CFLAGS)
 
 CFLAGS += $(C_CXX_FLAGS) -std=gnu99
 CXXFLAGS += $(C_CXX_FLAGS)

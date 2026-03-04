@@ -9,6 +9,28 @@ menu "RT-Smart 3rd-party Configuration"
         default n
 
         if RTSMART_3RD_PARTY_ENABLE_LVGL
+            choice
+                bool "Lvgl Color Depth"
+                default RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH_32
+
+                config RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH_8
+                    bool "8 (L8)"
+                config RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH_16
+                    bool "16 (RGB565)"
+                config RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH_24
+                    bool "24 (RGB888)"
+                config RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH_32
+                    bool "32 (ARGB8888)"
+            endchoice
+
+            config RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH
+            int
+            default 1 if RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH_1
+            default 8 if RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH_8
+            default 16 if RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH_16
+            default 24 if RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH_24
+            default 32 if RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH_32
+
             config RTSMART_3RD_PARTY_ENABLE_LVGL_EXAMPLES
                 bool "Enable LVGL Examples"
                 default n

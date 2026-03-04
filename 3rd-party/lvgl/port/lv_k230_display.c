@@ -41,6 +41,7 @@
 typedef struct {
     void*              buffer_addr;
     size_t             buffer_size;
+    size_t             data_size; // lvgl real used data size
     k_vb_blk_handle    block_handle;
     k_video_frame_info vf_info;
 } lv_k230_display_buffer_t;
@@ -57,46 +58,64 @@ typedef struct {
     lv_display_t* lv_disp;
 } lv_k230_display_intstance_t;
 
+static k_u8 lv_k230_map_color_format_to_pixel_size(lv_color_format_t color_format)
+{
+    switch (color_format) {
+    case LV_COLOR_FORMAT_L8:
+        return 1;
+    case LV_COLOR_FORMAT_AL88:
+    case LV_COLOR_FORMAT_RGB565:
+        return 2;
+    case LV_COLOR_FORMAT_RGB888:
+    case LV_COLOR_FORMAT_RGB565A8:
+        return 3;
+    case LV_COLOR_FORMAT_ARGB8888:
+    case LV_COLOR_FORMAT_XRGB8888:
+        return 4;
+    default:
+        printf("%s Unsupported color format %d\n", __func__, color_format);
+
+        return 0;
+    }
+}
+
 static k_pixel_format lv_k230_map_color_format_to_pixel_format(lv_color_format_t color_format)
 {
     switch (color_format) {
+    case LV_COLOR_FORMAT_L8:
+        return PIXEL_FORMAT_RGB_MONOCHROME_8BPP;
     case LV_COLOR_FORMAT_RGB565:
-        return PIXEL_FORMAT_RGB_565;
+        return PIXEL_FORMAT_RGB_565_LE;
     case LV_COLOR_FORMAT_RGB888:
-        return PIXEL_FORMAT_RGB_888;
+        return PIXEL_FORMAT_BGR_888;
     case LV_COLOR_FORMAT_ARGB8888:
     case LV_COLOR_FORMAT_XRGB8888:
-        // return PIXEL_FORMAT_ARGB_8888;
-        return PIXEL_FORMAT_BGRA_8888;
+        return PIXEL_FORMAT_ARGB_8888;
     default:
-        printf("Unsupported color format %d\n", color_format);
+        printf("%s Unsupported color format %d\n", __func__, color_format);
 
         return PIXEL_FORMAT_BUTT;
     }
 }
 
-static k_u8 lv_k230_osd_layer_pixel_fmt_bpp(lv_k230_display_intstance_t* inst)
+static k_u8 lv_k230_osd_layer_pixel_fmt_bpp(k_pixel_format pixel_fmt)
 {
-    k_u8 bpp = 0;
-
-    switch (inst->osd_layer_attr.pixel_format) {
+    switch (pixel_fmt) {
+    case PIXEL_FORMAT_RGB_MONOCHROME_8BPP:
+        return 1;
     case PIXEL_FORMAT_RGB_565:
-        bpp = 2;
-        break;
+    case PIXEL_FORMAT_RGB_565_LE:
+        return 2;
     case PIXEL_FORMAT_RGB_888:
-        bpp = 3;
-        break;
+    case PIXEL_FORMAT_BGR_888:
+        return 3;
     case PIXEL_FORMAT_ARGB_8888:
     case PIXEL_FORMAT_BGRA_8888:
-        bpp = 4;
-        break;
+        return 4;
     default:
-        printf("Unsupported pixel format %d\n", inst->osd_layer_attr.pixel_format);
-
-        break;
+        printf("%s Unsupported pixel format %d\n", __func__, pixel_fmt);
+        return 0;
     }
-
-    return bpp;
 }
 
 /* Helper function to allocate and map a single buffer */
@@ -124,20 +143,22 @@ static int k230_display_allocate_single_buffer(lv_k230_display_intstance_t* inst
 }
 
 /* Helper function to setup frame information for a buffer */
-static void k230_display_setup_frame_info(lv_k230_display_intstance_t* inst, lv_k230_display_buffer_t* buffer,
-                                          uint32_t stride_bytes)
+static void k230_display_setup_frame_info(lv_k230_display_intstance_t* inst, lv_k230_display_buffer_t* buffer)
 {
     k_u32 layer_width  = inst->osd_layer_attr.img_size.width;
     k_u32 layer_height = inst->osd_layer_attr.img_size.height;
 
     k_pixel_format pixel_fmt = inst->osd_layer_attr.pixel_format;
 
+    k_u8 pixel_bpp = lv_k230_osd_layer_pixel_fmt_bpp(pixel_fmt);
+
     buffer->vf_info.mod_id               = K_ID_VO;
     buffer->vf_info.pool_id              = inst->buffer_pool_id;
     buffer->vf_info.v_frame.width        = layer_width;
     buffer->vf_info.v_frame.height       = layer_height;
-    buffer->vf_info.v_frame.stride[0]    = stride_bytes;
+    buffer->vf_info.v_frame.stride[0]    = layer_width * pixel_bpp;
     buffer->vf_info.v_frame.pixel_format = pixel_fmt;
+    buffer->data_size                    = layer_width * layer_height * pixel_bpp;
 }
 
 /* The rest of the functions remain the same... */
@@ -179,8 +200,7 @@ static int k230_display_configure_buffers(lv_k230_display_intstance_t* inst)
     int   i;
     k_s32 ret;
 
-    size_t   buffer_size;
-    uint32_t stride_bytes;
+    size_t buffer_size;
 
     k_u8  pixel_fmt_bpp;
     k_u32 layer_width, layer_height;
@@ -197,15 +217,13 @@ static int k230_display_configure_buffers(lv_k230_display_intstance_t* inst)
     layer_height = inst->osd_layer_attr.img_size.height;
     layer_rotate = inst->osd_layer_attr.func;
 
-    pixel_fmt_bpp = lv_k230_osd_layer_pixel_fmt_bpp(inst);
+    pixel_fmt_bpp = lv_k230_map_color_format_to_pixel_size(LV_COLOR_FORMAT_NATIVE);
 
     // Calculate buffer size and stride
     buffer_size = layer_width * layer_height * pixel_fmt_bpp;
     if (buffer_size == 0) {
         return -1;
     }
-
-    stride_bytes = layer_width * pixel_fmt_bpp;
 
     // Destroy old VB pool if it exists
     if (inst->buffer_pool_id != VB_INVALID_POOLID) {
@@ -235,7 +253,7 @@ static int k230_display_configure_buffers(lv_k230_display_intstance_t* inst)
             return -1;
         }
 
-        k230_display_setup_frame_info(inst, &inst->buffer[i], stride_bytes);
+        k230_display_setup_frame_info(inst, &inst->buffer[i]);
     }
 
     // Update LVGL display buffers
@@ -313,7 +331,7 @@ static void flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* color_p
     }
 
     kd_mpi_sys_mmz_flush_cache(current_buffer->vf_info.v_frame.phys_addr[0], current_buffer->buffer_addr,
-                               current_buffer->buffer_size);
+                               current_buffer->data_size);
 
     kd_display_layer_push_frame(inst->osd_layer_attr.layer_id, &current_buffer->vf_info);
 
