@@ -6,7 +6,7 @@ menu "RT-Smart 3rd-party Configuration"
 
     menuconfig RTSMART_3RD_PARTY_ENABLE_LVGL
         bool "Enable Build LVGL"
-        default n
+        default y
 
         if RTSMART_3RD_PARTY_ENABLE_LVGL
             choice
