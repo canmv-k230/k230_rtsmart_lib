@@ -98,9 +98,9 @@ static inline int drv_gpio_toggle(drv_gpio_inst_t* inst)
     }
 
     if ((-1) == inst->curr_val) {
-        inst->curr_val = 0;
+        inst->curr_val = (gpio_pin_value_t)0;
     }
-    return drv_gpio_value_set(inst, 1 - inst->curr_val);
+    return drv_gpio_value_set(inst, (gpio_pin_value_t)(1 - inst->curr_val));
 }
 
 static inline int drv_gpio_enable_irq(drv_gpio_inst_t* inst) { return drv_gpio_set_irq(inst, 1); }
