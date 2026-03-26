@@ -162,13 +162,13 @@ static int _netmgmt_ioctl_with_type_rt_wlan_connect_config(uint32_t cmd, struct 
 
     if (password) {
         password_length = strlen(password);
-        if (RT_WLAN_SSID_MAX_LENGTH < password_length) {
+        if (RT_WLAN_PASSWORD_MAX_LENGTH < password_length) {
             printf("[hal_netmgmt]: %s invalid password length\n", __FUNCTION__);
             return -1;
         }
 
         config.key.len = (uint8_t)password_length & 0xFF;
-        strncpy((char*)&config.key.val, password, RT_WLAN_SSID_MAX_LENGTH);
+        strncpy((char*)&config.key.val, password, RT_WLAN_PASSWORD_MAX_LENGTH);
     } else {
         config.key.len    = 0;
         config.key.val[0] = '\0';
