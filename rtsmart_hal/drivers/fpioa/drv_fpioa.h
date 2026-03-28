@@ -29,8 +29,15 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "generated/autoconf.h"
+
 #define FPIOA_PIN_MAX_FUNCS    (5)
+
+#ifdef CONFIG_BOARD_NOT_SUPPORT_HW_RTC
+#define FPIOA_PIN_MAX_NUM      (64)
+#else
 #define FPIOA_PIN_MAX_NUM      (64 + 8)
+#endif
 #define FPIOA_PIN_FUNC_ALT_NUM (4)
 
 #ifdef __cplusplus

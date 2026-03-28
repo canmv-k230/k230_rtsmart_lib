@@ -22,7 +22,7 @@ OBJ_DIRS := $(sort $(dir $(OBJS)) $(RTSMART_HAL_LIB_INSTALL_PATH) $(RTSMART_HAL_
 
 # 5. Compiler Flags
 CFLAGS   := -std=gnu99 -fopenmp -march=rv64imafdcv -mabi=lp64d -mcmodel=medany -Os
-CFLAGS   += -I. -I../fpioa -I../timer
+CFLAGS   += -I. -I$(SDK_SRC_ROOT_DIR)/include -I../fpioa -I../timer
 CFLAGS   += -Wall -Wextra -ffunction-sections -fdata-sections
 
 .PHONY: all clean distclean
