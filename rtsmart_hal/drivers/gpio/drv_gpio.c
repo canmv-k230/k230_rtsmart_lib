@@ -25,12 +25,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#include "generated/autoconf.h"
 #include "drv_fpioa.h"
 #include "drv_gpio.h"
 #include "drv_timer.h"
@@ -66,6 +66,21 @@ static int gpio_fd      = -1;
 static int gpio_ref_cnt = 0;
 
 static const int gpio_inst_type = 0;
+
+static inline int drv_gpio_pin_enabled(int pin)
+{
+    if ((pin < 0) || (pin >= GPIO_MAX_NUM)) {
+        return 0;
+    }
+
+#ifdef CONFIG_BOARD_NOT_SUPPORT_HW_RTC
+    if (pin >= 64) {
+        return 0;
+    }
+#endif
+
+    return 1;
+}
 
 static int drv_gpio_open(void)
 {
@@ -114,12 +129,12 @@ int drv_gpio_inst_create(int pin, drv_gpio_inst_t** inst)
         return -1;
     }
 
-    if (GPIO_MAX_NUM <= pin) {
+    if (!drv_gpio_pin_enabled(pin)) {
         printf("[hal_gpio]: invalid pin %d\n", pin);
         return -1;
     }
 
-    if ((0x00 != drv_fpioa_get_pin_func(pin, &pin_curr_func)) || (pin_curr_func != (GPIO0 + pin))) {
+    if ((0x00 != drv_fpioa_get_pin_func(pin, &pin_curr_func)) || (pin_curr_func != (fpioa_func_t)(GPIO0 + pin))) {
         printf("[hal_gpio]: pin %d current fucntion not GPIO\n", pin);
         return -1;
     }
@@ -273,6 +288,8 @@ int drv_gpio_set_irq(drv_gpio_inst_t* inst, int enable)
 
 static void drv_gpio_sig_handler(int sig, siginfo_t* si, void* uc)
 {
+    (void)uc;
+
     drv_gpio_inst_t* inst = si->si_ptr;
 
     if (SI_SIGIO != si->si_code) {

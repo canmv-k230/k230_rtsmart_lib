@@ -24,14 +24,8 @@
  */
 #pragma once
 
-#include "generated/autoconf.h"
-
 #define GPIO_IRQ_MAX_NUM (64)
-#ifdef CONFIG_BOARD_NOT_SUPPORT_HW_RTC
-#define GPIO_MAX_NUM     (64)
-#else
 #define GPIO_MAX_NUM     (64 + 8)
-#endif
 
 #ifdef __cplusplus
 extern "C" {

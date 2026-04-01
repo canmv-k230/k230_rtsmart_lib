@@ -26,12 +26,12 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <errno.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include "generated/autoconf.h"
 #include "drv_fpioa.h"
 #include "hal_utils.h"
 
@@ -275,6 +275,30 @@ typedef struct _fpioa_pmu_iomux_cfg {
     } u;
 } fpioa_pmuiomux_cfg_t;
 
+static inline int drv_fpioa_pin_enabled(int pin)
+{
+    if ((pin < 0) || (pin >= FPIOA_PIN_MAX_NUM)) {
+        return 0;
+    }
+
+#ifdef CONFIG_BOARD_NOT_SUPPORT_HW_RTC
+    if (pin >= 64) {
+        return 0;
+    }
+#endif
+
+    return 1;
+}
+
+static inline int drv_fpioa_enabled_pin_count(void)
+{
+#ifdef CONFIG_BOARD_NOT_SUPPORT_HW_RTC
+    return 64;
+#else
+    return FPIOA_PIN_MAX_NUM;
+#endif
+}
+
 static uint32_t convert_iomux_to_pmu(uint32_t data)
 {
     fpioa_iomux_cfg_t    src;
@@ -407,6 +431,10 @@ static inline int drv_fpioa_set_pmu_iomux(int pin, uint32_t value)
 
 int drv_fpioa_get_pin_cfg(int pin, uint32_t* value)
 {
+    if (!drv_fpioa_pin_enabled(pin)) {
+        return -1;
+    }
+
     if (64 > pin) {
         return drv_fpioa_get_iomux(pin, value);
     }
@@ -416,6 +444,10 @@ int drv_fpioa_get_pin_cfg(int pin, uint32_t* value)
 
 int drv_fpioa_set_pin_cfg(int pin, uint32_t value)
 {
+    if (!drv_fpioa_pin_enabled(pin)) {
+        return -1;
+    }
+
     if (64 > pin) {
         return drv_fpioa_set_iomux(pin, value);
     }
@@ -451,7 +483,7 @@ int drv_fpioa_get_pin_func(int pin, fpioa_func_t* func)
     fpioa_iomux_cfg_t cfg;
     const uint8_t*    avail_func = NULL;
 
-    if (FPIOA_PIN_MAX_NUM <= pin) {
+    if (!drv_fpioa_pin_enabled(pin)) {
         printf("[hal_fpioa]: invalid pin %d\n", pin);
         return -1;
     }
@@ -489,7 +521,8 @@ int drv_fpioa_set_pin_func(int pin, fpioa_func_t func)
     int          alt_pins[FPIOA_PIN_FUNC_ALT_NUM];
     fpioa_func_t alt_pin_curr_func;
 
-    if (FPIOA_PIN_MAX_NUM <= pin) {
+    if (!drv_fpioa_pin_enabled(pin)) {
+        printf("[hal_fpioa]: invalid pin %d\n", pin);
         return -1;
     }
 
@@ -557,6 +590,10 @@ int drv_fpioa_func_available_pins(fpioa_func_t func, int pins[FPIOA_PIN_FUNC_ALT
     int pin_cnt = 0;
 
     for (size_t i = 0; i < sizeof(g_pin_func_array) / sizeof(g_pin_func_array[0]); i++) {
+        if (!drv_fpioa_pin_enabled((int)i)) {
+            continue;
+        }
+
         const uint8_t* pin_funcs = &g_pin_func_array[i][0];
 
         for (int j = 0; j < FPIOA_PIN_MAX_FUNCS; j++) {
@@ -578,7 +615,7 @@ int drv_fpioa_func_available_pins(fpioa_func_t func, int pins[FPIOA_PIN_FUNC_ALT
 /* Get all functions that can be assigned to a specific pin */
 int drv_fpioa_pin_supported_funcs(int pin, fpioa_func_t funcs[FPIOA_PIN_MAX_FUNCS])
 {
-    if (sizeof(g_pin_func_array) / sizeof(g_pin_func_array[0]) <= pin) {
+    if (!drv_fpioa_pin_enabled(pin)) {
         return -1;
     }
 
@@ -659,7 +696,7 @@ int drv_fpioa_find_pin_by_func(fpioa_func_t func)
         return -1;
     }
 
-    for (int i = 0; i < FPIOA_PIN_MAX_NUM; i++) {
+    for (int i = 0; i < drv_fpioa_enabled_pin_count(); i++) {
         if (0x00 != drv_fpioa_get_pin_func(i, &curr_func)) {
             return -1;
         }
