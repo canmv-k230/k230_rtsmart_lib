@@ -38,8 +38,8 @@
 #include "mpi_sys_api.h"
 
 /* FFT device ioctl ABI — must match kernel driver */
-#ifndef K_IOC_TYPE_DMA
-#define K_IOC_TYPE_DMA 'M'
+#ifndef K_IOC_TYPE_FFT
+#define K_IOC_TYPE_FFT 'f'
 #endif
 
 #define FFT_HAL_LOG(...) // Fprintf("[fft-hal] " __VA_ARGS__)
@@ -60,7 +60,7 @@ typedef struct {
     uint32_t reserved2;
 } k_fft_run_request;
 
-#define KD_IOC_CMD_FFT_RUN _IOW(K_IOC_TYPE_DMA, 204, k_fft_run_request)
+#define KD_IOC_CMD_FFT_RUN _IOW(K_IOC_TYPE_FFT, 204, k_fft_run_request)
 
 #define DRV_FFT_DEVICE_PATH "/dev/fft"
 
