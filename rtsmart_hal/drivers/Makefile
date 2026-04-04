@@ -10,6 +10,7 @@ subdirs-y := \
 	tsensor \
 	wdt \
 	spi \
+	fft \
 	pwm \
 	uart \
 	ws2812 \
