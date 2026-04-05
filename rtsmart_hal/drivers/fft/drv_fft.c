@@ -64,8 +64,17 @@ typedef struct {
 
 #define DRV_FFT_DEVICE_PATH "/dev/fft"
 
+/* Maximum DMA buffer size for largest supported FFT (4096 points, RR_II mode). */
+#define DRV_FFT_MAX_DMA_BYTES (4096 * sizeof(int16_t) * 2)
+
 struct drv_fft_inst {
-    int fd;
+    int      fd;
+    uint64_t input_phy;
+    void    *input_virt;
+    uint32_t input_alloc_size;
+    uint64_t output_phy;
+    void    *output_virt;
+    uint32_t output_alloc_size;
 };
 
 static int drv_fft_point_valid(uint32_t point)
@@ -96,6 +105,42 @@ static uint32_t drv_fft_input_bytes(const drv_fft_cfg_t* cfg)
 }
 
 static uint32_t drv_fft_output_bytes(const drv_fft_cfg_t* cfg) { return cfg->point * sizeof(short) * 2; }
+
+static int drv_fft_resize_buffer(uint64_t* phy_addr, void** virt_addr, uint32_t* alloc_size, uint32_t size,
+                                 const char* mmz_name)
+{
+    uint64_t new_phy;
+    void*    new_virt;
+    int      ret;
+
+    if (phy_addr == NULL || virt_addr == NULL || alloc_size == NULL || mmz_name == NULL) {
+        return -EINVAL;
+    }
+
+    if (size == 0) {
+        return -EINVAL;
+    }
+
+    if (*virt_addr != NULL && *alloc_size == size) {
+        return 0;
+    }
+
+    ret = kd_mpi_sys_mmz_alloc_cached(&new_phy, &new_virt, (char*)mmz_name, "anonymous", size);
+    if (ret != 0) {
+        printf("fft alloc %s failed ret=%d\n", mmz_name, ret);
+        return ret;
+    }
+
+    if (*virt_addr != NULL) {
+        kd_mpi_sys_mmz_free(*phy_addr, *virt_addr);
+    }
+
+    *phy_addr = new_phy;
+    *virt_addr = new_virt;
+    *alloc_size = size;
+
+    return 0;
+}
 
 static int drv_fft_validate(const drv_fft_cfg_t* cfg, const short* in_real, const short* in_imag, short* out_real,
                             short* out_imag)
@@ -181,6 +226,7 @@ static void drv_fft_unpack_output(const drv_fft_cfg_t* cfg, const uint64_t* src,
 int drv_fft_open(drv_fft_inst_t** inst)
 {
     drv_fft_inst_t* handle;
+    int             ret;
 
     if (inst == NULL) {
         return -EINVAL;
@@ -200,7 +246,31 @@ int drv_fft_open(drv_fft_inst_t** inst)
         return -errno;
     }
 
-    FFT_HAL_LOG("open ok fd=%d\n", handle->fd);
+    /* Pre-allocate DMA buffers so we avoid repeated MMZ alloc/free per frame. */
+    handle->input_alloc_size  = DRV_FFT_MAX_DMA_BYTES;
+    handle->output_alloc_size = DRV_FFT_MAX_DMA_BYTES;
+
+    ret = drv_fft_resize_buffer(&handle->input_phy, &handle->input_virt,
+                                &handle->input_alloc_size, handle->input_alloc_size, "fft_in");
+    if (ret != 0) {
+        printf("fft pre-alloc input failed ret=%d\n", ret);
+        close(handle->fd);
+        free(handle);
+        return ret;
+    }
+
+    ret = drv_fft_resize_buffer(&handle->output_phy, &handle->output_virt,
+                                &handle->output_alloc_size, handle->output_alloc_size, "fft_out");
+    if (ret != 0) {
+        printf("fft pre-alloc output failed ret=%d\n", ret);
+        kd_mpi_sys_mmz_free(handle->input_phy, handle->input_virt);
+        close(handle->fd);
+        free(handle);
+        return ret;
+    }
+
+    FFT_HAL_LOG("open ok fd=%d in=0x%lx out=0x%lx\n", handle->fd,
+                (unsigned long)handle->input_phy, (unsigned long)handle->output_phy);
 
     *inst = handle;
     return 0;
@@ -212,6 +282,13 @@ void drv_fft_close(drv_fft_inst_t** inst)
         return;
     }
 
+    if ((*inst)->output_virt) {
+        kd_mpi_sys_mmz_free((*inst)->output_phy, (*inst)->output_virt);
+    }
+    if ((*inst)->input_virt) {
+        kd_mpi_sys_mmz_free((*inst)->input_phy, (*inst)->input_virt);
+    }
+
     if ((*inst)->fd >= 0) {
         close((*inst)->fd);
     }
@@ -220,14 +297,48 @@ void drv_fft_close(drv_fft_inst_t** inst)
     *inst = NULL;
 }
 
+int drv_fft_set_input_alloc_size(drv_fft_inst_t* inst, uint32_t size)
+{
+    if (inst == NULL || inst->fd < 0) {
+        return -EINVAL;
+    }
+
+    return drv_fft_resize_buffer(&inst->input_phy, &inst->input_virt,
+                                 &inst->input_alloc_size, size, "fft_in");
+}
+
+int drv_fft_set_output_alloc_size(drv_fft_inst_t* inst, uint32_t size)
+{
+    if (inst == NULL || inst->fd < 0) {
+        return -EINVAL;
+    }
+
+    return drv_fft_resize_buffer(&inst->output_phy, &inst->output_virt,
+                                 &inst->output_alloc_size, size, "fft_out");
+}
+
+uint32_t drv_fft_get_input_alloc_size(const drv_fft_inst_t* inst)
+{
+    if (inst == NULL) {
+        return 0;
+    }
+
+    return inst->input_alloc_size;
+}
+
+uint32_t drv_fft_get_output_alloc_size(const drv_fft_inst_t* inst)
+{
+    if (inst == NULL) {
+        return 0;
+    }
+
+    return inst->output_alloc_size;
+}
+
 int drv_fft_run(drv_fft_inst_t* inst, const drv_fft_cfg_t* cfg, const short* in_real, const short* in_imag, short* out_real,
                 short* out_imag)
 {
     k_fft_run_request req;
-    uint64_t          input_phy   = 0;
-    uint64_t          output_phy  = 0;
-    void*             input_virt  = NULL;
-    void*             output_virt = NULL;
     int               ret;
 
     if (inst == NULL || inst->fd < 0) {
@@ -254,62 +365,52 @@ int drv_fft_run(drv_fft_inst_t* inst, const drv_fft_cfg_t* cfg, const short* in_
     req.input_len   = drv_fft_input_bytes(cfg);
     req.output_len  = drv_fft_output_bytes(cfg);
 
-    ret = kd_mpi_sys_mmz_alloc_cached(&input_phy, &input_virt, "fft_in", "anonymous", req.input_len);
-    if (ret != 0) {
-        printf("alloc input failed ret=%d len=%u\n", ret, req.input_len);
-        return ret;
+    /* Use pre-allocated DMA buffers; verify they are large enough. */
+    if (req.input_len > inst->input_alloc_size || req.output_len > inst->output_alloc_size) {
+        printf("fft buffer too small: need in=%u/%u out=%u/%u\n",
+               req.input_len, inst->input_alloc_size,
+               req.output_len, inst->output_alloc_size);
+        return -ENOMEM;
     }
 
-    ret = kd_mpi_sys_mmz_alloc_cached(&output_phy, &output_virt, "fft_out", "anonymous", req.output_len);
-    if (ret != 0) {
-        printf("alloc output failed ret=%d len=%u\n", ret, req.output_len);
-        kd_mpi_sys_mmz_free(input_phy, input_virt);
-        return ret;
-    }
+    FFT_HAL_LOG("mmz in=0x%lx/%u out=0x%lx/%u\n", (unsigned long)inst->input_phy, req.input_len,
+                (unsigned long)inst->output_phy, req.output_len);
 
-    FFT_HAL_LOG("mmz in=0x%lx/%u out=0x%lx/%u\n", (unsigned long)input_phy, req.input_len, (unsigned long)output_phy,
-                req.output_len);
+    drv_fft_pack_input(cfg, in_real, in_imag, (uint64_t*)inst->input_virt);
+    memset(inst->output_virt, 0, req.output_len);
 
-    drv_fft_pack_input(cfg, in_real, in_imag, (uint64_t*)input_virt);
-    memset(output_virt, 0, req.output_len);
-
-    ret = kd_mpi_sys_mmz_flush_cache(input_phy, input_virt, req.input_len);
+    ret = kd_mpi_sys_mmz_flush_cache(inst->input_phy, inst->input_virt, req.input_len);
     if (ret != 0) {
         printf("flush input failed ret=%d", ret);
-        goto cleanup;
+        return ret;
     }
 
-    ret = kd_mpi_sys_mmz_flush_cache(output_phy, output_virt, req.output_len);
+    ret = kd_mpi_sys_mmz_flush_cache(inst->output_phy, inst->output_virt, req.output_len);
     if (ret != 0) {
         printf("flush output failed ret=%d\n", ret);
-        goto cleanup;
+        return ret;
     }
 
-    req.input_phy_addr  = input_phy;
-    req.output_phy_addr = output_phy;
+    req.input_phy_addr  = inst->input_phy;
+    req.output_phy_addr = inst->output_phy;
 
     FFT_HAL_LOG("ioctl cmd=0x%lx\n", (unsigned long)KD_IOC_CMD_FFT_RUN);
     ret = ioctl(inst->fd, KD_IOC_CMD_FFT_RUN, &req);
     if (ret < 0) {
         printf("ioctl failed ret=%d errno=%d\n", ret, errno);
-        ret = (errno != 0) ? -errno : ret;
-        goto cleanup;
+        return (errno != 0) ? -errno : ret;
     }
 
     FFT_HAL_LOG("ioctl ok ret=%d\n", ret);
 
-    ret = kd_mpi_sys_mmz_invalidate_cache(output_phy, output_virt, req.output_len);
+    ret = kd_mpi_sys_mmz_invalidate_cache(inst->output_phy, inst->output_virt, req.output_len);
     if (ret != 0) {
         printf("invalidate output failed ret=%d\n", ret);
-        goto cleanup;
+        return ret;
     }
 
-    drv_fft_unpack_output(cfg, (const uint64_t*)output_virt, out_real, out_imag);
+    drv_fft_unpack_output(cfg, (const uint64_t*)inst->output_virt, out_real, out_imag);
 
-cleanup:
-    FFT_HAL_LOG("cleanup ret=%d\n", ret);
-    kd_mpi_sys_mmz_free(output_phy, output_virt);
-    kd_mpi_sys_mmz_free(input_phy, input_virt);
     return ret;
 }
 

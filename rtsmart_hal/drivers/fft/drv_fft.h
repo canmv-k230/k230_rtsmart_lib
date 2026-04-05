@@ -62,6 +62,12 @@ typedef struct {
 
 int  drv_fft_open(drv_fft_inst_t** inst);
 void drv_fft_close(drv_fft_inst_t** inst);
+
+int  drv_fft_set_input_alloc_size(drv_fft_inst_t* inst, uint32_t size);
+int  drv_fft_set_output_alloc_size(drv_fft_inst_t* inst, uint32_t size);
+uint32_t drv_fft_get_input_alloc_size(const drv_fft_inst_t* inst);
+uint32_t drv_fft_get_output_alloc_size(const drv_fft_inst_t* inst);
+
 int  drv_fft_run(drv_fft_inst_t* inst, const drv_fft_cfg_t* cfg, const short* in_real, const short* in_imag, short* out_real,
                  short* out_imag);
 int  drv_fft_fft(drv_fft_inst_t* inst, const drv_fft_cfg_t* cfg, const short* in_real, const short* in_imag, short* out_real,
