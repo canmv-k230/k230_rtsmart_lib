@@ -34,22 +34,11 @@
 #include "drv_input.h"
 #include "lvgl.h"
 
-/* Keep these prototypes local so this port still builds cleanly if the HAL header
- * is picked up through a stale include path by editor tooling or older build glue.
- */
-bool drv_input_is_disconnect_error(int ret);
-int drv_input_reconnect_by_type(drv_input_inst_t **inst,
-                                uint32_t kind,
-                                char *path,
-                                size_t path_size,
-                                struct drv_input_info *info);
-
 #define LV_K230_HID_KEY_QUEUE_SIZE   32
 #define LV_K230_HID_MAX_READ_BATCH   16
 #define LV_K230_HID_TRANSLATED_KEYS  128
 #define LV_K230_HID_BTN_LEFT_MASK    (1u << 0)
 #define LV_K230_HID_BTN_TOUCH_MASK   (1u << 7)
-#define LV_K230_HID_RECONNECT_MS     500
 
 typedef struct {
     uint32_t key;
@@ -59,10 +48,6 @@ typedef struct {
 
 typedef struct {
     drv_input_inst_t* inst;
-    struct drv_input_info info;
-    uint32_t preferred_kind;
-    uint32_t reconnect_after;
-    bool auto_reconnect;
     lv_point_t point;
     bool point_initialized;
     lv_indev_state_t pointer_state;
@@ -111,12 +96,10 @@ static lv_k230_hid_ctx_t* lv_k230_hid_open_ctx(const char* dev_path)
 
     if (drv_input_inst_create_path(dev_path, &ctx->inst) != 0) {
         lv_free(ctx);
-        printf("[lv_hid] failed to open %s\n", dev_path);
         return NULL;
     }
 
-    if (drv_input_get_info(ctx->inst, &ctx->info) != 0) {
-        printf("[lv_hid] failed to query %s info\n", dev_path);
+    if (drv_input_get_info(ctx->inst, &ctx->inst->info) != 0) {
         lv_k230_hid_destroy_ctx(&ctx);
         return NULL;
     }
@@ -141,35 +124,6 @@ static void lv_k230_hid_reset_runtime_state(lv_k230_hid_ctx_t* ctx)
     ctx->key_event_count = 0;
     memset(ctx->translated_keys, 0, sizeof(ctx->translated_keys));
     memset(ctx->key_events, 0, sizeof(ctx->key_events));
-}
-
-static bool lv_k230_hid_try_reconnect(lv_k230_hid_ctx_t* ctx)
-{
-    uint32_t now;
-    int ret;
-
-    if (ctx == NULL || !ctx->auto_reconnect || ctx->preferred_kind == DRV_INPUT_DEV_UNKNOWN) {
-        return false;
-    }
-
-    now = lv_tick_get();
-    if ((int32_t)(now - ctx->reconnect_after) < 0) {
-        return false;
-    }
-
-    ret = drv_input_reconnect_by_type(&ctx->inst,
-                                      ctx->preferred_kind,
-                                      ctx->inst != NULL ? ctx->inst->path : NULL,
-                                      ctx->inst != NULL ? sizeof(ctx->inst->path) : 0,
-                                      &ctx->info);
-    if (ret == 0) {
-        lv_k230_hid_reset_runtime_state(ctx);
-        printf("[lv_hid] reconnected %s on %s\n", ctx->info.name, ctx->inst->path);
-        return true;
-    }
-
-    ctx->reconnect_after = now + LV_K230_HID_RECONNECT_MS;
-    return false;
 }
 
 static void lv_k230_hid_event_cb(lv_event_t* e)
@@ -443,11 +397,9 @@ static void lv_k230_hid_pointer_read_cb(lv_indev_t* indev, lv_indev_data_t* data
                                  ? LV_INDEV_STATE_PRESSED
                                  : LV_INDEV_STATE_RELEASED;
         data->timestamp = lv_tick_get();
-        if (drv_input_poll(ctx->inst, 0) > 0) {
+        if (drv_input_inst_is_connected(ctx->inst) && drv_input_poll(ctx->inst, 0) > 0) {
             data->continue_reading = true;
         }
-    } else if (drv_input_is_disconnect_error(ret)) {
-        lv_k230_hid_try_reconnect(ctx);
     }
 
     lv_k230_hid_clamp_point(indev, &ctx->point);
@@ -469,9 +421,6 @@ static void lv_k230_hid_collect_key_events(lv_k230_hid_ctx_t* ctx)
         int ret = drv_input_read_keyboard_frame(ctx->inst, &frame);
 
         if (ret <= 0) {
-            if (drv_input_is_disconnect_error(ret)) {
-                lv_k230_hid_try_reconnect(ctx);
-            }
             break;
         }
 
@@ -564,15 +513,15 @@ static lv_indev_t* lv_k230_hid_create_pointer(const char* dev_path)
         return NULL;
     }
 
-    if (!lv_k230_hid_pointer_kind_ok(ctx->info.kind)) {
-        printf("[lv_hid] %s is not a pointer device (%s)\n", dev_path, ctx->info.name);
+    if (!lv_k230_hid_pointer_kind_ok(ctx->inst->info.kind)) {
+        printf("[lv_hid] %s is not a pointer device (%s)\n", dev_path, ctx->inst->info.name);
         lv_k230_hid_destroy_ctx(&ctx);
         return NULL;
     }
 
-    ctx->preferred_kind = ctx->info.kind == DRV_INPUT_DEV_TOUCH ? DRV_INPUT_DEV_TOUCH : DRV_INPUT_DEV_MOUSE;
-    ctx->auto_reconnect = true;
-    ctx->reconnect_after = 0;
+    ctx->inst->preferred_kind = ctx->inst->info.kind == DRV_INPUT_DEV_TOUCH
+                                    ? DRV_INPUT_DEV_TOUCH : DRV_INPUT_DEV_MOUSE;
+    drv_input_inst_set_auto_reconnect(ctx->inst, ctx->inst->preferred_kind);
 
     indev = lv_indev_create();
     if (indev == NULL) {
@@ -585,7 +534,7 @@ static lv_indev_t* lv_k230_hid_create_pointer(const char* dev_path)
     lv_indev_set_driver_data(indev, ctx);
     lv_indev_add_event_cb(indev, lv_k230_hid_event_cb, LV_EVENT_DELETE, NULL);
 
-    printf("[lv_hid] pointer input initialized: %s (%s)\n", dev_path, ctx->info.name);
+    printf("[lv_hid] pointer input initialized: %s (%s)\n", dev_path, ctx->inst->info.name);
     return indev;
 }
 
@@ -598,15 +547,14 @@ static lv_indev_t* lv_k230_hid_create_keypad(const char* dev_path)
         return NULL;
     }
 
-    if (!lv_k230_hid_keypad_kind_ok(ctx->info.kind)) {
-        printf("[lv_hid] %s is not a keyboard device (%s)\n", dev_path, ctx->info.name);
+    if (!lv_k230_hid_keypad_kind_ok(ctx->inst->info.kind)) {
+        printf("[lv_hid] %s is not a keyboard device (%s)\n", dev_path, ctx->inst->info.name);
         lv_k230_hid_destroy_ctx(&ctx);
         return NULL;
     }
 
-    ctx->preferred_kind = DRV_INPUT_DEV_KEYBOARD;
-    ctx->auto_reconnect = true;
-    ctx->reconnect_after = 0;
+    ctx->inst->preferred_kind = DRV_INPUT_DEV_KEYBOARD;
+    drv_input_inst_set_auto_reconnect(ctx->inst, DRV_INPUT_DEV_KEYBOARD);
 
     indev = lv_indev_create();
     if (indev == NULL) {
@@ -619,7 +567,7 @@ static lv_indev_t* lv_k230_hid_create_keypad(const char* dev_path)
     lv_indev_set_driver_data(indev, ctx);
     lv_indev_add_event_cb(indev, lv_k230_hid_event_cb, LV_EVENT_DELETE, NULL);
 
-    printf("[lv_hid] keypad input initialized: %s (%s)\n", dev_path, ctx->info.name);
+    printf("[lv_hid] keypad input initialized: %s (%s)\n", dev_path, ctx->inst->info.name);
     return indev;
 }
 
@@ -650,13 +598,14 @@ void lv_k230_hid_set_auto_reconnect(lv_indev_t* indev, bool enabled)
     }
 
     ctx = (lv_k230_hid_ctx_t*)lv_indev_get_driver_data(indev);
-    if (ctx == NULL) {
+    if (ctx == NULL || ctx->inst == NULL) {
         return;
     }
 
-    ctx->auto_reconnect = enabled;
     if (enabled) {
-        ctx->reconnect_after = 0;
+        drv_input_inst_set_auto_reconnect(ctx->inst, ctx->inst->preferred_kind);
+    } else {
+        ctx->inst->auto_reconnect = false;
     }
 }
 

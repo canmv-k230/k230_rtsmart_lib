@@ -94,11 +94,17 @@ typedef struct _drv_input_inst {
     uint32_t button_state;
     struct drv_input_info info;
     char path[DRV_INPUT_PATH_MAX];
+    uint32_t preferred_kind;
+    bool auto_reconnect;
 } drv_input_inst_t;
 
 int drv_input_inst_create(int id, drv_input_inst_t **inst);
 int drv_input_inst_create_path(const char *path, drv_input_inst_t **inst);
 void drv_input_inst_destroy(drv_input_inst_t **inst);
+void drv_input_inst_mark_disconnected(drv_input_inst_t *inst);
+bool drv_input_inst_is_connected(drv_input_inst_t *inst);
+int drv_input_inst_try_reconnect(drv_input_inst_t *inst);
+void drv_input_inst_set_auto_reconnect(drv_input_inst_t *inst, uint32_t kind);
 
 int drv_input_poll(drv_input_inst_t *inst, int timeout_ms);
 int drv_input_read_event(drv_input_inst_t *inst, struct input_event *event);
@@ -108,12 +114,6 @@ int drv_input_read_pointer_frame(drv_input_inst_t *inst, struct drv_pointer_fram
 int drv_input_get_info(drv_input_inst_t *inst, struct drv_input_info *info);
 int drv_input_find_first_by_type(uint32_t kind, char *path, size_t path_size, struct drv_input_info *info);
 bool drv_input_is_disconnect_error(int ret);
-int drv_input_reconnect_path(drv_input_inst_t **inst, const char *path, struct drv_input_info *info);
-int drv_input_reconnect_by_type(drv_input_inst_t **inst,
-                                uint32_t kind,
-                                char *path,
-                                size_t path_size,
-                                struct drv_input_info *info);
 
 bool drv_input_is_key_event(const struct input_event *event);
 bool drv_input_is_rel_event(const struct input_event *event);

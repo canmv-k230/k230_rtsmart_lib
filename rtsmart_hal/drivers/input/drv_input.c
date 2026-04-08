@@ -195,20 +195,108 @@ void drv_input_inst_destroy(drv_input_inst_t **inst)
     *inst = NULL;
 }
 
+void drv_input_inst_mark_disconnected(drv_input_inst_t *inst)
+{
+    if (inst == NULL) {
+        return;
+    }
+
+    if (inst->fd >= 0) {
+        close(inst->fd);
+        inst->fd = -1;
+    }
+
+    inst->button_state = 0;
+    memset(&inst->info, 0, sizeof(inst->info));
+}
+
+bool drv_input_inst_is_connected(drv_input_inst_t *inst)
+{
+    return inst != NULL && inst->fd >= 0;
+}
+
+int drv_input_inst_try_reconnect(drv_input_inst_t *inst)
+{
+    char path[DRV_INPUT_PATH_MAX];
+    struct drv_input_info info;
+    int fd;
+
+    if (inst == NULL) {
+        return -EINVAL;
+    }
+
+    if (inst->fd >= 0) {
+        return 0;
+    }
+
+    if (inst->preferred_kind == DRV_INPUT_DEV_UNKNOWN) {
+        return -EINVAL;
+    }
+
+    if (drv_input_find_first_by_type(inst->preferred_kind, path, sizeof(path), &info) != 0) {
+        return -ENOENT;
+    }
+
+    fd = open(path, O_RDONLY | O_NONBLOCK);
+    if (fd < 0) {
+        return -errno;
+    }
+
+    inst->fd = fd;
+    inst->button_state = 0;
+    strncpy(inst->path, path, sizeof(inst->path) - 1);
+    inst->path[sizeof(inst->path) - 1] = '\0';
+    inst->info = info;
+
+    return 0;
+}
+
+void drv_input_inst_set_auto_reconnect(drv_input_inst_t *inst, uint32_t kind)
+{
+    if (inst == NULL) {
+        return;
+    }
+
+    inst->preferred_kind = kind;
+    inst->auto_reconnect = (kind != DRV_INPUT_DEV_UNKNOWN);
+}
+
+static int drv_input_handle_disconnect(drv_input_inst_t *inst)
+{
+    drv_input_inst_mark_disconnected(inst);
+
+    if (!inst->auto_reconnect) {
+        return -ENODEV;
+    }
+
+    if (drv_input_inst_try_reconnect(inst) == 0) {
+        return 0;
+    }
+
+    return -ENODEV;
+}
+
 int drv_input_poll(drv_input_inst_t *inst, int timeout_ms)
 {
     int remaining_ms;
     int ret;
 
-    if (inst == NULL || inst->fd < 0) {
+    if (inst == NULL) {
         errno = EINVAL;
         return -1;
+    }
+
+    if (inst->fd < 0) {
+        if (inst->auto_reconnect && drv_input_inst_try_reconnect(inst) == 0) {
+            return 1;
+        }
+        return -ENODEV;
     }
 
     if (timeout_ms == 0) {
         ret = drv_input_poll_once(inst, 0);
         if (ret == 0 && drv_input_path_rebound(inst)) {
-            return -ENODEV;
+            return drv_input_handle_disconnect(inst);
         }
         return ret;
     }
@@ -226,12 +314,18 @@ int drv_input_poll(drv_input_inst_t *inst, int timeout_ms)
         }
 
         ret = drv_input_poll_once(inst, slice_ms);
-        if (ret != 0) {
+        if (ret < 0) {
+            if (drv_input_ret_is_disconnect(ret)) {
+                return drv_input_handle_disconnect(inst);
+            }
+            return ret;
+        }
+        if (ret > 0) {
             return ret;
         }
 
         if (drv_input_path_rebound(inst)) {
-            return -ENODEV;
+            return drv_input_handle_disconnect(inst);
         }
 
         if (timeout_ms > 0) {
@@ -246,8 +340,15 @@ int drv_input_read_event(drv_input_inst_t *inst, struct input_event *event)
 {
     ssize_t bytes_read;
 
-    if (inst == NULL || inst->fd < 0 || event == NULL) {
+    if (inst == NULL || event == NULL) {
         return -EINVAL;
+    }
+
+    if (inst->fd < 0) {
+        if (inst->auto_reconnect && drv_input_inst_try_reconnect(inst) == 0) {
+            return 0;
+        }
+        return -ENODEV;
     }
 
     bytes_read = read(inst->fd, event, sizeof(*event));
@@ -255,15 +356,18 @@ int drv_input_read_event(drv_input_inst_t *inst, struct input_event *event)
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             return 0;
         }
+        if (drv_input_ret_is_disconnect(-errno)) {
+            return drv_input_handle_disconnect(inst);
+        }
         return -errno;
     }
 
     if (bytes_read == 0) {
-        return -ENODEV;
+        return drv_input_handle_disconnect(inst);
     }
 
     if ((size_t)bytes_read != sizeof(*event)) {
-        return -EIO;
+        return drv_input_handle_disconnect(inst);
     }
 
     return 1;
@@ -274,10 +378,17 @@ int drv_input_read_frame(drv_input_inst_t *inst, struct drv_input_frame *frame)
     int ret;
 
     if (inst == NULL || frame == NULL) {
-        return -1;
+        return -EINVAL;
     }
 
     memset(frame, 0, sizeof(*frame));
+
+    if (inst->fd < 0) {
+        if (inst->auto_reconnect && drv_input_inst_try_reconnect(inst) == 0) {
+            return 0;
+        }
+        return -ENODEV;
+    }
 
     while (frame->count < DRV_INPUT_MAX_FRAME_EVENTS) {
         ret = drv_input_read_event(inst, &frame->events[frame->count]);
@@ -305,8 +416,8 @@ int drv_input_read_keyboard_frame(drv_input_inst_t *inst, struct drv_keyboard_fr
     size_t index;
     int ret;
 
-    if (frame == NULL) {
-        return -1;
+    if (inst == NULL || frame == NULL) {
+        return -EINVAL;
     }
 
     memset(frame, 0, sizeof(*frame));
@@ -314,6 +425,9 @@ int drv_input_read_keyboard_frame(drv_input_inst_t *inst, struct drv_keyboard_fr
     ret = drv_input_read_frame(inst, &raw_frame);
     if (ret < 0) {
         return ret;
+    }
+    if (ret == 0) {
+        return 0;
     }
 
     frame->complete = raw_frame.complete;
@@ -343,7 +457,7 @@ int drv_input_read_pointer_frame(drv_input_inst_t *inst, struct drv_pointer_fram
     int ret;
 
     if (inst == NULL || frame == NULL) {
-        return -1;
+        return -EINVAL;
     }
 
     memset(frame, 0, sizeof(*frame));
@@ -351,6 +465,9 @@ int drv_input_read_pointer_frame(drv_input_inst_t *inst, struct drv_pointer_fram
     ret = drv_input_read_frame(inst, &raw_frame);
     if (ret < 0) {
         return ret;
+    }
+    if (ret == 0) {
+        return 0;
     }
 
     frame->complete = raw_frame.complete;
@@ -480,57 +597,6 @@ int drv_input_find_first_by_type(uint32_t kind, char *path, size_t path_size,
 bool drv_input_is_disconnect_error(int ret)
 {
     return drv_input_ret_is_disconnect(ret);
-}
-
-int drv_input_reconnect_path(drv_input_inst_t **inst, const char *path, struct drv_input_info *info)
-{
-    drv_input_inst_t *new_inst = NULL;
-    int ret;
-
-    if (inst == NULL || path == NULL) {
-        errno = EINVAL;
-        return -1;
-    }
-
-    ret = drv_input_inst_create_path(path, &new_inst);
-    if (ret != 0) {
-        return ret;
-    }
-
-    if (info != NULL) {
-        ret = drv_input_get_info(new_inst, info);
-        if (ret != 0) {
-            drv_input_inst_destroy(&new_inst);
-            return ret;
-        }
-    }
-
-    drv_input_inst_destroy(inst);
-    *inst = new_inst;
-    return 0;
-}
-
-int drv_input_reconnect_by_type(drv_input_inst_t **inst,
-                                uint32_t kind,
-                                char *path,
-                                size_t path_size,
-                                struct drv_input_info *info)
-{
-    struct drv_input_info local_info;
-    char local_path[DRV_INPUT_PATH_MAX];
-    int ret;
-
-    if (path == NULL) {
-        path = local_path;
-        path_size = sizeof(local_path);
-    }
-
-    ret = drv_input_find_first_by_type(kind, path, path_size, info != NULL ? info : &local_info);
-    if (ret != 0) {
-        return ret;
-    }
-
-    return drv_input_reconnect_path(inst, path, info);
 }
 
 bool drv_input_is_key_event(const struct input_event *event)
