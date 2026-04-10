@@ -16,7 +16,8 @@ subdirs-y := \
 	uart \
 	ws2812 \
 	onewire \
-	touch
+	touch \
+	gzip_decomp
 
 subdirs-$(CONFIG_ENABLE_ROTARY_ENCODER) += rotary_encoder
 
