@@ -82,6 +82,8 @@ int pthread_mutex_lock(pthread_mutex_t *m)
             retry = 0;
             printf("pthread_mutex_lock: failed to lock mutex after %d tries\n", retry);
         }
+
+        usleep(1000); // sleep for 1ms before retrying to avoid busy-waiting
     }
 
     return 0; // success
