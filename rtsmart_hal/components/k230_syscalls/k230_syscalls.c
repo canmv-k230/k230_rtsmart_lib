@@ -88,3 +88,8 @@ int pthread_mutex_lock(pthread_mutex_t *m)
 
     return 0; // success
 }
+
+int pthread_get_tid(void)
+{
+    return syscall(_NRSYS_gettid);
+}

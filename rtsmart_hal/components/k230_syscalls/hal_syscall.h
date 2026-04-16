@@ -231,6 +231,8 @@ NRSYS(statfs)
 typedef void* rt_device_t;
 typedef void* rt_mq_t;
 
+int pthread_get_tid(void);
+
 static inline __attribute__((always_inline)) rt_device_t rt_device_find(const char* name)
 {
     return (rt_device_t)syscall(_NRSYS_rt_device_find, (long)name);
