@@ -3,6 +3,7 @@ include ../../mkenv.mk
 subdirs-y := \
 	fpioa \
 	gpio \
+	pmu \
 	input \
 	timer \
 	sbus \
