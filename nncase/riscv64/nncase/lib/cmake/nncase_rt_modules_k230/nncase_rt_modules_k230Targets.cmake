@@ -59,7 +59,7 @@ endif()
 add_library(runtime_k230 INTERFACE IMPORTED)
 
 set_target_properties(runtime_k230 PROPERTIES
-  INTERFACE_LINK_DIRECTORIES "/data/huochenghai/k230/k230_sdk_release/src/big/mpp/userapps/lib;/data/huochenghai/k230/k230_sdk_release/src/big/rt-smart/userapps/sdk/lib/risc-v/rv64;/data/huochenghai/k230/k230_sdk_release/src/big/rt-smart/userapps/sdk/rt-thread/lib/risc-v/rv64"
+  INTERFACE_LINK_DIRECTORIES "/mnt/nncase_k230_build/k230_rtos_sdk/src/big/mpp/userapps/lib;/mnt/nncase_k230_build/k230_rtos_sdk/src/big/rt-smart/userapps/sdk/lib/risc-v/rv64;/mnt/nncase_k230_build/k230_rtos_sdk/src/big/rt-smart/userapps/sdk/rt-thread/lib/risc-v/rv64"
   INTERFACE_LINK_LIBRARIES "nncaseruntime;sys"
 )
 
