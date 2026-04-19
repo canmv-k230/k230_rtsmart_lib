@@ -13,6 +13,37 @@
 
 #include "hal_utils.h"
 
+#include <stdio.h>
+#include <stdarg.h>
+
+/*
+ * C99-conforming snprintf wrapper.
+ *
+ * The toolchain's musl vsnprintf has an off-by-one: it initialises
+ * cookie.n = n instead of n-1, so sn_write copies up to n bytes of
+ * content and then writes a NUL terminator at position n — one byte
+ * past the caller's buffer.  We compensate by passing n-1 to
+ * vsnprintf (for n >= 2), handling n <= 1 as special cases.
+ */
+int mbedtls_platform_snprintf(char *s, size_t n, const char *fmt, ...)
+{
+    int ret;
+    va_list ap;
+
+    va_start(ap, fmt);
+    if (n <= 1) {
+        char dummy;
+        ret = vsnprintf(&dummy, 0, fmt, ap);
+        if (n == 1) {
+            s[0] = '\0';
+        }
+    } else {
+        ret = vsnprintf(s, n - 1, fmt, ap);
+    }
+    va_end(ap);
+    return ret;
+}
+
 #if defined(MBEDTLS_HAVE_TIME)
 
 #if defined(MBEDTLS_PLATFORM_MS_TIME_ALT)

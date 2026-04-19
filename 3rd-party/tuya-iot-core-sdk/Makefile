@@ -39,6 +39,9 @@ CFLAGS += -I$(SDK_DIR)/libraries/coreHTTP/source/include
 CFLAGS += -I$(SDK_DIR)/libraries/coreHTTP/source/dependency/3rdparty/http_parser
 CFLAGS += -I$(SDK_DIR)/libraries/coreJSON/source/include
 CFLAGS += -I$(SDK_RTSMART_SRC_DIR)/libs/3rd-party/mbedtls/mbedtls/include
+CFLAGS += -I$(SDK_RTSMART_SRC_DIR)/libs/3rd-party/mbedtls/port
+CFLAGS += -DMBEDTLS_USER_CONFIG_FILE=\"mbedtls_port_config.h\"
+CFLAGS += -I$(RTSMART_HAL_INC_INSTALL_PATH)
 CFLAGS += -I$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
 CFLAGS += -std=gnu99 -fopenmp -march=rv64imafdcv -mabi=lp64d -mcmodel=medany -Os
 

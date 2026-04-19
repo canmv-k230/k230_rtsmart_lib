@@ -9,9 +9,18 @@ CWARN :=
 
 C_CXX_FLAGS := -fopenmp -march=rv64imafdcv -mabi=lp64d -mcmodel=medany -Os $(CWARN) $(LIB_CFLAGS)
 C_CXX_FLAGS += -I$(SDK_SRC_ROOT_DIR)/include -include "generated/autoconf.h"
-C_CXX_FLAGS += -I$(SDK_RTSMART_SRC_DIR)/libs/3rd-party/mbedtls/mbedtls/include
 
+ifeq ($(CONFIG_MINIHTTP_USE_MBEDTLS),y)
 C_CXX_FLAGS += -DMINIHTTP_USE_MBEDTLS
+C_CXX_FLAGS += -I$(SDK_RTSMART_SRC_DIR)/libs/3rd-party/mbedtls/mbedtls/include
+C_CXX_FLAGS += -I$(SDK_RTSMART_SRC_DIR)/libs/3rd-party/mbedtls/port
+C_CXX_FLAGS += -DMBEDTLS_USER_CONFIG_FILE=\"mbedtls_port_config.h\"
+C_CXX_FLAGS += -I$(RTSMART_HAL_INC_INSTALL_PATH)
+endif
+
+ifeq ($(CONFIG_MINIHTTP_USE_DEBUG),y)
+C_CXX_FLAGS += -D_DEBUG
+endif
 
 CFLAGS := $(C_CXX_FLAGS) -std=gnu99
 CXXFLAGS := $(C_CXX_FLAGS) -std=c++20
@@ -33,9 +42,12 @@ all: $(LIB)
 	@cp minihttp.h $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/
 	@$(ECHO) [BUILD] libs 3rd-party $(DIR) done.
 
-$(LIB): $(OBJS) | $(OBJ_DIRS)
+.PHONY: .FORCE
+.FORCE:
+
+$(LIB): $(OBJS) .FORCE | $(OBJ_DIRS)
 	@echo [LD] $@
-	$(Q)$(AR) rcs $@ $^
+	$(Q)$(AR) rcs $@ $(OBJS)
 
 # Fix: Static Pattern Rule for C
 $(COBJS) : $(BUILD)/%.o : %.c | $(OBJ_DIRS)

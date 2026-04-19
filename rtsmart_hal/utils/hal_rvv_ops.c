@@ -33,7 +33,7 @@ void *hal_rvv_memcpy(void *dst, const void *src, size_t n)
     uint8_t *d = (uint8_t *)dst;
     size_t remaining = n;
 
-    if (64 >= n) {
+    if (8 > n) {
         return memcpy(dst, src, n);
     }
 
@@ -65,7 +65,7 @@ void *hal_rvv_memset(void *dst, int value, size_t n)
     size_t remaining = n;
     uintptr_t fill = (uint8_t)value;
 
-    if (64 >= n) {
+    if (8 > n) {
         return memset(dst, value, n);
     }
 

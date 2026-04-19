@@ -166,7 +166,7 @@ int mbedtls_net_connect(mbedtls_net_context *ctx, const char *host,
     }
 
     /* Do name resolution with both IPv6 and IPv4 */
-    memset(&hints, 0, sizeof(hints));
+    hal_rvv_memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = proto == MBEDTLS_NET_PROTO_UDP ? SOCK_DGRAM : SOCK_STREAM;
     hints.ai_protocol = proto == MBEDTLS_NET_PROTO_UDP ? IPPROTO_UDP : IPPROTO_TCP;
@@ -216,7 +216,7 @@ int mbedtls_net_bind(mbedtls_net_context *ctx, const char *bind_ip, const char *
     }
 
     /* Bind to IPv6 and/or IPv4, but only in the desired protocol */
-    memset(&hints, 0, sizeof(hints));
+    hal_rvv_memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = proto == MBEDTLS_NET_PROTO_UDP ? SOCK_DGRAM : SOCK_STREAM;
     hints.ai_protocol = proto == MBEDTLS_NET_PROTO_UDP ? IPPROTO_UDP : IPPROTO_TCP;
@@ -413,7 +413,7 @@ int mbedtls_net_accept(mbedtls_net_context *bind_ctx,
                 return MBEDTLS_ERR_NET_BUFFER_TOO_SMALL;
             }
 
-            memcpy(client_ip, &addr4->sin_addr.s_addr, *cip_len);
+            hal_rvv_memcpy(client_ip, &addr4->sin_addr.s_addr, *cip_len);
         } else {
             struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *) &client_addr;
             *cip_len = sizeof(addr6->sin6_addr.s6_addr);
@@ -422,7 +422,7 @@ int mbedtls_net_accept(mbedtls_net_context *bind_ctx,
                 return MBEDTLS_ERR_NET_BUFFER_TOO_SMALL;
             }
 
-            memcpy(client_ip, &addr6->sin6_addr.s6_addr, *cip_len);
+            hal_rvv_memcpy(client_ip, &addr6->sin6_addr.s6_addr, *cip_len);
         }
     }
 
@@ -478,8 +478,8 @@ int mbedtls_net_poll(mbedtls_net_context *ctx, uint32_t rw, uint32_t timeout)
     /* Ensure that memory sanitizers consider read_fds and write_fds as
      * initialized even on platforms such as Glibc/x86_64 where FD_ZERO
      * is implemented in assembly. */
-    memset(&read_fds, 0, sizeof(read_fds));
-    memset(&write_fds, 0, sizeof(write_fds));
+    hal_rvv_memset(&read_fds, 0, sizeof(read_fds));
+    hal_rvv_memset(&write_fds, 0, sizeof(write_fds));
 #endif
 #endif
 

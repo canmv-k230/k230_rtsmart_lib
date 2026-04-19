@@ -5,6 +5,7 @@ LIB_CFLAGS :=
 LIB_LDFLAGS :=
 
 include $(SDK_RTSMART_SRC_DIR)/libs/mk/librtsmart_hal.mk
+include $(SDK_RTSMART_SRC_DIR)/libs/mk/libmpp.mk
 
 DIR = $(shell basename `pwd`)
 LOCAL_SRC_DIR = $(shell pwd)
@@ -49,7 +50,7 @@ CFLAGS_MBEDTLS += -I$(LOCAL_SRC_DIR)/port $(LIB_CFLAGS)
 LDFLAGS_MBEDTLS := -n --static -T $(LOCAL_SRC_DIR)/port/link.lds -L$(RTSMART_3RD_PARTY_LIB_INSTALL_PATH) -lmbedtls_port $(LIB_CFLAGS) $(LIB_LDFLAGS)
 
 .PHONY: mbedtls_library
-mbedtls_library:
+mbedtls_library: mbedtls_headers_install
 	@$(MAKE) -C mbedtls/library CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)' || exit $?;
 
 .PHONY: mbedtls_library-clean
@@ -64,6 +65,12 @@ ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS_TESTS),y)
 	@$(MAKE) -C mbedtls/programs/fuzz CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)' || exit $?;
 endif
 
+.PHONY: mbedtls_headers_install
+mbedtls_headers_install: check_path
+	@cp -rp mbedtls/include/mbedtls $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
+	@cp -rp mbedtls/include/psa $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
+	@cp -rp port/*.h $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
+
 .PHONY: mbedtls_tests-clean
 mbedtls_tests-clean:
 ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS_TESTS),y)
@@ -72,13 +79,10 @@ ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS_TESTS),y)
 endif
 
 .PHONY: all
-all: check_path $(LIB) mbedtls_library mbedtls_tests
+all: check_path $(LIB) mbedtls_headers_install mbedtls_library mbedtls_tests
 	@cp -rp mbedtls/library/libmbedtls.a $(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)
 	@cp -rp mbedtls/library/libmbedx509.a $(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)
 	@cp -rp mbedtls/library/libmbedcrypto.a $(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)
-	@cp -rp mbedtls/include/mbedtls $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
-	@cp -rp mbedtls/include/psa $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
-	@cp -rp port/*.h $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
 
 ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS_TESTS),y)
 	@mkdir -p $(RTSMART_LIBS_3RD_PARTY_ELF_INSTALL_PATH)/mbedtls/

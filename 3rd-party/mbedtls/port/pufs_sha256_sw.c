@@ -1,0 +1,15 @@
+#define MBEDTLS_CONFIG_FILE "mbedtls_sw_sha256_config.h"
+
+#define mbedtls_sha256_context mbedtls_sha256_sw_context
+#define mbedtls_sha256_init mbedtls_sha256_sw_init
+#define mbedtls_sha256_free mbedtls_sha256_sw_free
+#define mbedtls_sha256_clone mbedtls_sha256_sw_clone
+#define mbedtls_sha256_starts mbedtls_sha256_sw_starts
+#define mbedtls_sha256_update mbedtls_sha256_sw_update
+#define mbedtls_sha256_finish mbedtls_sha256_sw_finish
+#define mbedtls_internal_sha256_process mbedtls_internal_sha256_sw_process
+#define mbedtls_sha256 mbedtls_sha256_sw
+#define mbedtls_sha256_self_test mbedtls_sha256_sw_self_test
+#define mbedtls_sha224_self_test mbedtls_sha224_sw_self_test
+
+#include "../mbedtls/library/sha256.c"

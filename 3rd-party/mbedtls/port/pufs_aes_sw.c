@@ -1,0 +1,24 @@
+#define MBEDTLS_CONFIG_FILE "mbedtls_sw_aes_config.h"
+
+#define mbedtls_aes_context mbedtls_aes_sw_context
+#define mbedtls_aes_xts_context mbedtls_aes_sw_xts_context
+#define mbedtls_aes_init mbedtls_aes_sw_init
+#define mbedtls_aes_free mbedtls_aes_sw_free
+#define mbedtls_aes_setkey_enc mbedtls_aes_sw_setkey_enc
+#define mbedtls_aes_setkey_dec mbedtls_aes_sw_setkey_dec
+#define mbedtls_internal_aes_encrypt mbedtls_internal_aes_sw_encrypt
+#define mbedtls_internal_aes_decrypt mbedtls_internal_aes_sw_decrypt
+#define mbedtls_aes_crypt_ecb mbedtls_aes_sw_crypt_ecb
+#define mbedtls_aes_crypt_cbc mbedtls_aes_sw_crypt_cbc
+#define mbedtls_aes_xts_init mbedtls_aes_sw_xts_init
+#define mbedtls_aes_xts_free mbedtls_aes_sw_xts_free
+#define mbedtls_aes_xts_setkey_enc mbedtls_aes_sw_xts_setkey_enc
+#define mbedtls_aes_xts_setkey_dec mbedtls_aes_sw_xts_setkey_dec
+#define mbedtls_aes_crypt_xts mbedtls_aes_sw_crypt_xts
+#define mbedtls_aes_crypt_cfb128 mbedtls_aes_sw_crypt_cfb128
+#define mbedtls_aes_crypt_cfb8 mbedtls_aes_sw_crypt_cfb8
+#define mbedtls_aes_crypt_ofb mbedtls_aes_sw_crypt_ofb
+#define mbedtls_aes_crypt_ctr mbedtls_aes_sw_crypt_ctr
+#define mbedtls_aes_self_test mbedtls_aes_sw_self_test
+
+#include "../mbedtls/library/aes.c"

@@ -56,6 +56,10 @@ menu "RT-Smart 3rd-party Configuration"
             config MINIHTTP_USE_MBEDTLS
                 bool "Enable miniHTTP MbedTLS Support"
                 default y if RTSMART_3RD_PARTY_ENABLE_MBEDTLS
+
+            config MINIHTTP_USE_DEBUG
+                bool "Enable miniHTTP Debug Output"
+                default n
         endif
 
     menuconfig RTSMART_3RD_PARTY_ENABLE_TUYALINKSDK

@@ -86,34 +86,41 @@ static void timer_irq(void* args)
 {
     (void)args;
     mbedtls_timing_alarmed = 1;
+    /* One-shot: stop the timer so it does not keep firing. */
+    if (timer_inst != NULL) {
+        drv_soft_timer_stop(timer_inst);
+    }
 }
 
 void mbedtls_set_alarm(int seconds)
 {
+    /* Cancel any previous pending alarm first. */
+    if (timer_inst != NULL && drv_soft_timer_is_started(timer_inst)) {
+        drv_soft_timer_stop(timer_inst);
+    }
+
     mbedtls_timing_alarmed = 0;
+
+    if (seconds == 0) {
+        /* alarm(0) cancels any pending alarm and raises the flag
+           immediately so that polling loops terminate at once. */
+        mbedtls_timing_alarmed = 1;
+        return;
+    }
 
     if (NULL == timer_inst) {
         if (0x00 != drv_soft_timer_create(&timer_inst)) {
             mbedtls_printf("create timer failed.\n");
+            mbedtls_timing_alarmed = 1;   /* unblock caller */
             return;
         }
     }
 
-    if (drv_soft_timer_is_started(timer_inst)) {
-        drv_soft_timer_stop(timer_inst);
-    }
-
-    drv_soft_timer_set_mode(timer_inst, HWTIMER_MODE_PERIOD);
-    drv_soft_timer_set_period(timer_inst, 10000);
+    drv_soft_timer_set_mode(timer_inst, HWTIMER_MODE_ONESHOT);
+    drv_soft_timer_set_period(timer_inst, seconds * 1000);
 
     drv_soft_timer_register_irq(timer_inst, timer_irq, NULL);
     drv_soft_timer_start(timer_inst);
-
-    if (seconds == 0) {
-        /* alarm(0) cancelled any previous pending alarm, but the
-           handler won't fire, so raise the flag straight away. */
-        mbedtls_timing_alarmed = 1;
-    }
 }
 
 unsigned long mbedtls_timing_hardclock(void) { return (unsigned long)utils_cpu_ticks(); }
