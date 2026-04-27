@@ -317,9 +317,10 @@ Key slots:
 | `drv_pufs_otp_lock(dev, addr, len, lock)` | Lock OTP region |
 | `drv_pufs_otp_get_rwlck(dev, addr, lock)` | Query OTP lock status |
 | `drv_pufs_key_to_otp(dev, slot, key, keybits)` | Program key into OTP |
+| `drv_pufs_otp_apply_security_config(dev, spi2axi, jtag, secure_boot, isp)` | Program OTP security config bits |
+| `drv_pufs_otp_get_security_config_state(dev, state)` | Read OTP security config state and word locks |
+| `drv_pufs_otp_lock_security_config_words(dev)` | Lock OTP security config words read-only |
 | `drv_pufs_rt_version(dev, version, features)` | Query PUFrt version |
-| `drv_pufs_zeroize(dev, slot)` | Zeroize PUF slot |
-| `drv_pufs_post_mask(dev, maskslots)` | Post-masking operation |
 
 ### RNG / DRBG
 
@@ -423,8 +424,9 @@ accessible at `/dev/pufs` with `RT_DEVICE_FLAG_RDWR`.
 | `PUFS_OTP_RWLCK_GET` | 0x05 | Query OTP lock status |
 | `PUFS_RT_VERSION` | 0x06 | PUFrt version/features |
 | `PUFS_KEY2OTP` | 0x07 | Program key to OTP |
-| `PUFS_ZEROIZE` | 0x08 | Zeroize PUF slot |
-| `PUFS_POST_MASK` | 0x09 | Post-masking |
+| `PUFS_OTP_SEC_CFG` | 0x0A | Program OTP security config bits |
+| `PUFS_OTP_SEC_LOCK` | 0x0B | Lock OTP security config words |
+| `PUFS_OTP_SEC_STATE` | 0x0C | Query OTP security config state |
 | `PUFS_KEY_INOUT` | 0x10 | Key import/export/clear |
 | `PUFS_KEY_DERIVE` | 0x11 | Key derivation |
 | `PUFS_ECC_PRK_GEN` | 0x40 | ECC private key generation |

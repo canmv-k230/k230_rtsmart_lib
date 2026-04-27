@@ -41,8 +41,9 @@ enum pufs_op_type {
 #define PUFS_OTP_RWLCK_GET  _IOWR('P', 0x05, int)
 #define PUFS_RT_VERSION     _IOWR('P', 0x06, int)
 #define PUFS_KEY2OTP        _IOWR('P', 0x07, int)
-#define PUFS_ZEROIZE        _IOWR('P', 0x08, int)
-#define PUFS_POST_MASK      _IOWR('P', 0x09, int)
+#define PUFS_OTP_SEC_CFG    _IOWR('P', 0x0A, int)
+#define PUFS_OTP_SEC_LOCK   _IOWR('P', 0x0B, int)
+#define PUFS_OTP_SEC_STATE  _IOWR('P', 0x0C, int)
 #define PUFS_KEY_INOUT      _IOWR('P', 0x10, int)
 #define PUFS_KEY_DERIVE     _IOWR('P', 0x11, int)
 #define PUFS_ECC_PRK_GEN    _IOWR('P', 0x40, int)
@@ -443,15 +444,23 @@ typedef struct {
     uint8_t  lock;    /* pufs_otp_lock_t: NA/RO/RW, or N_OTP_LOCK_T to skip */
 } pufs_key2otp_t;
 
-/* Zeroize PUF slot */
 typedef struct {
-    uint8_t  slot;
-} pufs_zeroize_t;
+    uint8_t disable_spi2axi;
+    uint8_t disable_jtag;
+    uint8_t force_secure_boot;
+    uint8_t disable_isp;
+} pufs_otp_security_cfg_t;
 
-/* Post-masking */
 typedef struct {
-    uint64_t maskslots;
-} pufs_post_mask_t;
+    uint8_t disable_spi2axi;
+    uint8_t disable_jtag;
+    uint8_t force_secure_boot;
+    uint8_t disable_isp;
+    uint8_t spi2axi_word_lock;
+    uint8_t jtag_word_lock;
+    uint8_t boot_ctrl_word_lock;
+    uint8_t reserved0;
+} pufs_otp_security_state_t;
 
 /* DRBG instantiate */
 typedef struct {
@@ -856,11 +865,17 @@ int drv_pufs_otp_get_rwlck(drv_pufs_inst *dev, uint16_t addr, uint8_t *lock);
 int drv_pufs_key_to_otp(drv_pufs_inst *dev, pufs_rt_slot_t slot,
                         const uint8_t *key, uint32_t keybits,
                         uint8_t lock);
+int drv_pufs_otp_apply_security_config(drv_pufs_inst *dev,
+                                       bool disable_spi2axi,
+                                       bool disable_jtag,
+                                       bool force_secure_boot,
+                                       bool disable_isp);
+int drv_pufs_otp_get_security_config_state(drv_pufs_inst *dev,
+                                           pufs_otp_security_state_t *state);
+int drv_pufs_otp_lock_security_config_words(drv_pufs_inst *dev);
 
 /* ===== PUFrt management API ===== */
 int drv_pufs_rt_version(drv_pufs_inst *dev, uint32_t *version, uint32_t *features);
-int drv_pufs_zeroize(drv_pufs_inst *dev, pufs_rt_slot_t slot);
-int drv_pufs_post_mask(drv_pufs_inst *dev, uint64_t maskslots);
 
 /* ===== RNG API ===== */
 int drv_pufs_rng_read(drv_pufs_inst *dev, uint8_t *buf, uint32_t len);

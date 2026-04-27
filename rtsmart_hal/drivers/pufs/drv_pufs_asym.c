@@ -629,6 +629,70 @@ int drv_pufs_otp_lock(drv_pufs_inst *dev, uint16_t addr, uint32_t len, uint8_t l
     return ret;
 }
 
+int drv_pufs_otp_apply_security_config(drv_pufs_inst *dev,
+                                       bool disable_spi2axi,
+                                       bool disable_jtag,
+                                       bool force_secure_boot,
+                                       bool disable_isp)
+{
+    int ret;
+
+    if (!dev || dev->fd < 0)
+        return -1;
+
+    if (drv_pufs_dev_lock(dev) != 0)
+        return -1;
+
+    pufs_otp_security_cfg_t arg;
+    hal_rvv_memset(&arg, 0, sizeof(arg));
+    arg.disable_spi2axi = disable_spi2axi ? 1 : 0;
+    arg.disable_jtag = disable_jtag ? 1 : 0;
+    arg.force_secure_boot = force_secure_boot ? 1 : 0;
+    arg.disable_isp = disable_isp ? 1 : 0;
+
+    ret = drv_pufs_ioctl(dev->fd, PUFS_OTP_SEC_CFG, &arg);
+
+    drv_pufs_dev_unlock(dev);
+    return ret;
+}
+
+int drv_pufs_otp_get_security_config_state(drv_pufs_inst *dev,
+                                           pufs_otp_security_state_t *state)
+{
+    int ret;
+
+    if (!dev || dev->fd < 0 || !state)
+        return -1;
+
+    if (drv_pufs_dev_lock(dev) != 0)
+        return -1;
+
+    hal_rvv_memset(state, 0, sizeof(*state));
+    ret = drv_pufs_ioctl(dev->fd, PUFS_OTP_SEC_STATE, state);
+
+    drv_pufs_dev_unlock(dev);
+    return ret;
+}
+
+int drv_pufs_otp_lock_security_config_words(drv_pufs_inst *dev)
+{
+    int ret;
+
+    if (!dev || dev->fd < 0)
+        return -1;
+
+    if (drv_pufs_dev_lock(dev) != 0)
+        return -1;
+
+    pufs_otp_security_cfg_t arg;
+    hal_rvv_memset(&arg, 0, sizeof(arg));
+
+    ret = drv_pufs_ioctl(dev->fd, PUFS_OTP_SEC_LOCK, &arg);
+
+    drv_pufs_dev_unlock(dev);
+    return ret;
+}
+
 /* ===== RNG ===== */
 
 int drv_pufs_rng_read(drv_pufs_inst *dev, uint8_t *buf, uint32_t len)
@@ -721,46 +785,6 @@ int drv_pufs_rt_version(drv_pufs_inst *dev, uint32_t *version, uint32_t *feature
         if (version) *version = arg.version;
         if (features) *features = arg.features;
     }
-
-    drv_pufs_dev_unlock(dev);
-    return ret;
-}
-
-int drv_pufs_zeroize(drv_pufs_inst *dev, pufs_rt_slot_t slot)
-{
-    int ret;
-
-    if (!dev || dev->fd < 0)
-        return -1;
-
-    if (drv_pufs_dev_lock(dev) != 0)
-        return -1;
-
-    pufs_zeroize_t arg;
-    hal_rvv_memset(&arg, 0, sizeof(arg));
-    arg.slot = slot;
-
-    ret = drv_pufs_ioctl(dev->fd, PUFS_ZEROIZE, &arg);
-
-    drv_pufs_dev_unlock(dev);
-    return ret;
-}
-
-int drv_pufs_post_mask(drv_pufs_inst *dev, uint64_t maskslots)
-{
-    int ret;
-
-    if (!dev || dev->fd < 0)
-        return -1;
-
-    if (drv_pufs_dev_lock(dev) != 0)
-        return -1;
-
-    pufs_post_mask_t arg;
-    hal_rvv_memset(&arg, 0, sizeof(arg));
-    arg.maskslots = maskslots;
-
-    ret = drv_pufs_ioctl(dev->fd, PUFS_POST_MASK, &arg);
 
     drv_pufs_dev_unlock(dev);
     return ret;
