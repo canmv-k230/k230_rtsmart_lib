@@ -78,28 +78,8 @@ DEPS  := $(OBJS:.o=.o.d)
 
 OBJ_DIRS := $(sort $(dir $(OBJS) $(LIB)))
 
-.PHONY: check_path
-check_path:
-	@if [ -z "$(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)" ]; then \
-		echo "Error: RTSMART_3RD_PARTY_LIB_INSTALL_PATH is not set"; \
-		exit 1; \
-	fi
-	@if [ ! -d "$(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)" ]; then \
-		mkdir -p "$(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)"; \
-	fi
-	@if [ -z "$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)" ]; then \
-		echo "Error: RTSMART_3RD_PARTY_INC_INSTALL_PATH is not set"; \
-		exit 1; \
-	fi
-	@if [ ! -d "$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)" ]; then \
-		mkdir -p "$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)"; \
-	fi
-
 .PHONY: all
-all: check_path $(LIB)
-	@cp -rp $(LOCAL_SRC_DIR)/freetype/include/freetype $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
-	@cp -rp $(LOCAL_SRC_DIR)/freetype/include/ft2build.h $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
-	@cp -rp freetype_wrap.h $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
+all: $(LIB)
 	@$(ECHO) [BUILD] libs 3rd-party $(DIR) done.
 
 $(LIB): $(OBJS) | $(OBJ_DIRS)
@@ -120,5 +100,12 @@ clean:
 
 $(OBJ_DIRS):
 	@$(MKDIR) -p $@
+
+# Header install
+HEADER_DIRS := freetype/include:
+HEADER_FILES := freetype_wrap.h
+HEADER_INSTALL := $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/freetype
+
+include $(SDK_RTSMART_SRC_DIR)/libs/mk/tools_install_header.mk
 
 -include $(DEPS)

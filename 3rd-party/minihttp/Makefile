@@ -39,7 +39,6 @@ OBJ_DIRS := $(sort $(dir $(OBJS) $(LIB)))
 
 .PHONY: all
 all: $(LIB)
-	@cp minihttp.h $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/
 	@$(ECHO) [BUILD] libs 3rd-party $(DIR) done.
 
 .PHONY: .FORCE
@@ -65,6 +64,13 @@ clean:
 
 $(OBJ_DIRS):
 	@$(MKDIR) -p $@
+
+# Header install
+HEADER_DIRS := 
+HEADER_FILES := minihttp.h
+HEADER_INSTALL := $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/minihttp
+
+include $(SDK_RTSMART_SRC_DIR)/libs/mk/tools_install_header.mk
 
 # Include dependencies if they exist
 -include $(DEPS)

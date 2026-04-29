@@ -27,16 +27,10 @@ CXXOBJS := $(addprefix $(BUILD)/, $(CXXFILES:.cpp=.o))
 OBJS    := $(COBJS) $(CXXOBJS)
 DEPS    := $(OBJS:.o=.o.d)
 
-HEADERS := \
-	cJSON/cJSON.h \
-	cJSON/cJSON_Utils.h \
-
-HEADER_TARGETS := $(addprefix $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/,$(HEADERS))
-
-OBJ_DIRS := $(sort $(dir $(OBJS) $(LIB) $(HEADER_TARGETS)))
+OBJ_DIRS := $(sort $(dir $(OBJS) $(LIB)))
 
 .PHONY: all
-all: $(LIB) $(HEADER_TARGETS)
+all: $(LIB)
 	@$(ECHO) [BUILD] libs 3rd-party $(DIR) done.
 
 $(LIB): $(OBJS) | $(OBJ_DIRS)
@@ -60,8 +54,12 @@ clean:
 $(OBJ_DIRS):
 	@$(MKDIR) -p $@
 
-$(HEADER_TARGETS): $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/%: % | $(OBJ_DIRS)
-	@$(CP) $< $@
+# Header install
+HEADER_DIRS := 
+HEADER_FILES := cJSON/cJSON.h cJSON/cJSON_Utils.h 
+HEADER_INSTALL := $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/cJSON
+
+include $(SDK_RTSMART_SRC_DIR)/libs/mk/tools_install_header.mk
 
 # Include dependencies if they exist
 -include $(DEPS)

@@ -50,7 +50,7 @@ CFLAGS_MBEDTLS += -I$(LOCAL_SRC_DIR)/port $(LIB_CFLAGS)
 LDFLAGS_MBEDTLS := -n --static -T $(LOCAL_SRC_DIR)/port/link.lds -L$(RTSMART_3RD_PARTY_LIB_INSTALL_PATH) -lmbedtls_port $(LIB_CFLAGS) $(LIB_LDFLAGS)
 
 .PHONY: mbedtls_library
-mbedtls_library: mbedtls_headers_install
+mbedtls_library:
 	@$(MAKE) -C mbedtls/library CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)' || exit $?;
 
 .PHONY: mbedtls_library-clean
@@ -65,12 +65,6 @@ ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS_TESTS),y)
 	@$(MAKE) -C mbedtls/programs/fuzz CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)' || exit $?;
 endif
 
-.PHONY: mbedtls_headers_install
-mbedtls_headers_install: check_path
-	@cp -rp mbedtls/include/mbedtls $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
-	@cp -rp mbedtls/include/psa $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
-	@cp -rp port/*.h $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)
-
 .PHONY: mbedtls_tests-clean
 mbedtls_tests-clean:
 ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS_TESTS),y)
@@ -79,7 +73,7 @@ ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS_TESTS),y)
 endif
 
 .PHONY: all
-all: check_path $(LIB) mbedtls_headers_install mbedtls_library mbedtls_tests
+all: $(LIB) mbedtls_library mbedtls_tests
 	@cp -rp mbedtls/library/libmbedtls.a $(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)
 	@cp -rp mbedtls/library/libmbedx509.a $(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)
 	@cp -rp mbedtls/library/libmbedcrypto.a $(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)
@@ -99,7 +93,7 @@ endif
 
 $(LIB): $(OBJS) | $(OBJ_DIRS)
 	@echo [LD] $@
-	$(Q)$(AR) rcs $@ $^
+	$(Q)$(AR) rcs $@ $(OBJS)
 
 $(COBJS) : $(BUILD)/%.o : %.c | $(OBJ_DIRS)
 	@echo [CC] $<
@@ -114,24 +108,20 @@ clean: mbedtls_library-clean mbedtls_tests-clean
 	@$(MAKE) -C mbedtls/tests clean
 	@rm -rf $(LIB) $(OBJS) $(DEPS)
 
-.PHONY: check_path
-check_path:
-	@if [ -z "$(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)" ]; then \
-		echo "Error: RTSMART_3RD_PARTY_LIB_INSTALL_PATH is not set"; \
-		exit 1; \
-	fi
-	@if [ ! -d "$(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)" ]; then \
-		mkdir -p "$(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)"; \
-	fi
-	@if [ -z "$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)" ]; then \
-		echo "Error: RTSMART_3RD_PARTY_INC_INSTALL_PATH is not set"; \
-		exit 1; \
-	fi
-	@if [ ! -d "$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)" ]; then \
-		mkdir -p "$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)"; \
-	fi
-
 $(OBJ_DIRS):
 	@$(MKDIR) -p $@
+
+# Header install
+HEADER_DIRS := \
+	mbedtls/include/mbedtls:mbedtls \
+	mbedtls/include/psa:psa \
+
+HEADER_FILES := port/*.h
+HEADER_INSTALL := $(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/mbedtls
+
+include $(SDK_RTSMART_SRC_DIR)/libs/mk/tools_install_header.mk
+
+$(LIB): install-headers
+mbedtls_library: install-headers
 
 -include $(DEPS)
