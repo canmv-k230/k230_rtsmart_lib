@@ -70,4 +70,13 @@ menu "RT-Smart 3rd-party Configuration"
         if RTSMART_3RD_PARTY_ENABLE_TUYALINKSDK
             
         endif
+
+    menuconfig RTSMART_3RD_PARTY_ENABLE_CJSON
+        bool "Enable Build cJSON"
+        default n
+
+        if RTSMART_3RD_PARTY_ENABLE_CJSON
+
+        endif
+
 endmenu

@@ -1,4 +1,7 @@
-lib3rd_party_inc_dir := $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include
+lib3rd_party_inc_dir := \
+	$(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include \
+	$(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include/cJSON \
+
 lib3rd_party_lib_dir := $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/lib
 
 LIB_CFLAGS += $(addprefix -I, $(lib3rd_party_inc_dir))
