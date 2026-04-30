@@ -25,10 +25,20 @@
 
 #include <sys/statfs.h>
 #include <sys/statvfs.h>
+#include <sys/ioctl.h>
 
+#include <errno.h>
 #include <pthread.h>
 
 #include "hal_syscall.h"
+
+#define RT_FIOPREALLOCATE 0x52540003U
+
+struct dfs_preallocate_args
+{
+    off_t offset;
+    off_t len;
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 // Syscalls for statfs and statvfs ////////////////////////////////////////////
@@ -63,6 +73,31 @@ int statvfs(const char* restrict path, struct statvfs* restrict buf)
         return -1;
     fixup(buf, &kbuf);
     return 0;
+}
+
+/*
+ * FatFs f_expand() only supports allocating an empty file from offset 0 and
+ * does not provide general sparse/zero-fill semantics for arbitrary ranges.
+ */
+int posix_fallocate(int fd, off_t offset, off_t len)
+{
+    struct dfs_preallocate_args args;
+
+    if (offset < 0 || len <= 0)
+        return EINVAL;
+
+    args.offset = offset;
+    args.len = len;
+
+    if (ioctl(fd, RT_FIOPREALLOCATE, &args) == 0)
+        return 0;
+
+    return errno ? errno : EIO;
+}
+
+int posix_fallocate64(int fd, off_t offset, off_t len)
+{
+    return posix_fallocate(fd, offset, len);
 }
 
 /*
