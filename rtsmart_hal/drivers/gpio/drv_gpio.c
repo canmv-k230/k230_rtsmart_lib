@@ -26,6 +26,7 @@
 #include <stdlib.h>
 
 #include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -64,6 +65,7 @@ typedef struct {
 
 static int gpio_fd      = -1;
 static int gpio_ref_cnt = 0;
+static pthread_mutex_t gpio_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static const int gpio_inst_type = 0;
 
@@ -84,41 +86,63 @@ static inline int drv_gpio_pin_enabled(int pin)
 
 static int drv_gpio_open(void)
 {
+    int ret = 0;
+
+    pthread_mutex_lock(&gpio_lock);
     if (0x00 > gpio_fd) {
         gpio_fd = open(DRV_GPIO_DEV, O_RDWR);
         if (0x00 > gpio_fd) {
-            printf("[hal_gpio]: open gpio device failed.\n");
-            return -1;
+            ret = -1;
+            goto _unlock;
         }
     }
 
     gpio_ref_cnt++;
 
-    return 0;
+_unlock:
+    pthread_mutex_unlock(&gpio_lock);
+
+    if (ret) {
+        printf("[hal_gpio]: open gpio device failed.\n");
+    }
+
+    return ret;
 }
 
 static void drv_gpio_close(void)
 {
-    if (0x00 > gpio_fd) {
-        if (0x00 == (--gpio_ref_cnt)) {
+    pthread_mutex_lock(&gpio_lock);
+    if (0x00 <= gpio_fd) {
+        if ((gpio_ref_cnt > 0) && (0x00 == (--gpio_ref_cnt))) {
             close(gpio_fd);
             gpio_fd = -1;
         }
     }
+    pthread_mutex_unlock(&gpio_lock);
 }
 
 static inline int drv_gpio_ioctl(int cmd, void* arg)
 {
+    int ret = 0;
+
+    pthread_mutex_lock(&gpio_lock);
     if (0x00 > gpio_fd) {
-        printf("[hal_gpio]: gpio not open\n");
-        return -1;
+        ret = -1;
+        goto _unlock;
     }
 
     if (0x00 != ioctl(gpio_fd, cmd, arg)) {
-        return -1;
+        ret = -1;
     }
 
-    return 0;
+_unlock:
+    pthread_mutex_unlock(&gpio_lock);
+
+    if (ret && (0x00 > gpio_fd)) {
+        printf("[hal_gpio]: gpio not open\n");
+    }
+
+    return ret;
 }
 
 int drv_gpio_inst_create(int pin, drv_gpio_inst_t** inst)
@@ -191,29 +215,45 @@ void drv_gpio_inst_destroy(drv_gpio_inst_t** inst)
 int drv_gpio_value_set(drv_gpio_inst_t* inst, gpio_pin_value_t val)
 {
     uint8_t value = val;
+    int     ret   = -1;
+    int     gpio_not_open = 0;
 
     if (NULL == inst) {
         return -1;
     }
 
+    pthread_mutex_lock(&gpio_lock);
     if (0x00 > gpio_fd) {
-        printf("[hal_gpio]: gpio not open\n");
-        return -1;
+        gpio_not_open = 1;
+        goto _unlock;
     }
 
     if (inst->curr_val == val) {
-        return 0;
-    }
-    inst->curr_val = val;
-
-    lseek(gpio_fd, inst->pin, SEEK_SET);
-
-    if (0x01 != write(gpio_fd, &value, 1)) {
-        printf("[hal_gpio]: set pin%d failed\n", inst->pin);
-        return -1;
+        ret = 0;
+        goto _unlock;
     }
 
-    return 0;
+    if ((off_t)inst->pin != lseek(gpio_fd, inst->pin, SEEK_SET)) {
+        goto _unlock;
+    }
+
+    if (0x01 == write(gpio_fd, &value, 1)) {
+        inst->curr_val = val;
+        ret            = 0;
+    }
+
+_unlock:
+    pthread_mutex_unlock(&gpio_lock);
+
+    if (ret) {
+        if (gpio_not_open) {
+            printf("[hal_gpio]: gpio not open\n");
+        } else {
+            printf("[hal_gpio]: set pin%d failed\n", inst->pin);
+        }
+    }
+
+    return ret;
 }
 
 gpio_pin_value_t drv_gpio_value_get(drv_gpio_inst_t* inst)
@@ -224,18 +264,28 @@ gpio_pin_value_t drv_gpio_value_get(drv_gpio_inst_t* inst)
         return GPIO_PV_LOW;
     }
 
+    pthread_mutex_lock(&gpio_lock);
     if (0x00 > gpio_fd) {
+        pthread_mutex_unlock(&gpio_lock);
         printf("[hal_gpio]: gpio not open\n");
         return -1;
     }
 
-    lseek(gpio_fd, inst->pin, SEEK_SET);
-
-    if (0x01 != read(gpio_fd, &value, 1)) {
+    if ((off_t)inst->pin != lseek(gpio_fd, inst->pin, SEEK_SET)) {
+        pthread_mutex_unlock(&gpio_lock);
         printf("[hal_gpio]: get pin%d failed\n", inst->pin);
         return -1;
     }
+
+    if (0x01 != read(gpio_fd, &value, 1)) {
+        pthread_mutex_unlock(&gpio_lock);
+        printf("[hal_gpio]: get pin%d failed\n", inst->pin);
+        return -1;
+    }
+
     inst->curr_val = value;
+
+    pthread_mutex_unlock(&gpio_lock);
 
     return value;
 }
@@ -251,9 +301,14 @@ int drv_gpio_mode_set(drv_gpio_inst_t* inst, gpio_drive_mode_t mode)
     if (mode == inst->curr_mode) {
         return 0;
     }
+
+    if (0x00 != drv_gpio_ioctl(KD_GPIO_IOCTL_SET_MODE, &cfg)) {
+        return -1;
+    }
+
     inst->curr_mode = mode;
 
-    return drv_gpio_ioctl(KD_GPIO_IOCTL_SET_MODE, &cfg);
+    return 0;
 }
 
 gpio_drive_mode_t drv_gpio_mode_get(drv_gpio_inst_t* inst)
@@ -342,9 +397,6 @@ int drv_gpio_register_irq(drv_gpio_inst_t* inst, gpio_pin_edge_t mode, int debou
         }
     }
 
-    inst->curr_irq_mode = mode;
-    inst->irq_args      = userargs;
-    inst->irq_callback  = callback;
     inst->signo = (KD_GPIO_SIG + (register_cnt++ % 8));
 
     sa.sa_flags     = SA_SIGINFO;
@@ -368,6 +420,10 @@ int drv_gpio_register_irq(drv_gpio_inst_t* inst, gpio_pin_edge_t mode, int debou
 
         return -1;
     }
+
+    inst->curr_irq_mode = mode;
+    inst->irq_args      = userargs;
+    inst->irq_callback  = callback;
 
     return 0;
 }

@@ -26,6 +26,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <pthread.h>
+
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -39,6 +41,8 @@
 #define PMU_IOMUX_REG_ADDR 0x91000080
 
 #pragma pack(1)
+
+static pthread_mutex_t g_fpioa_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static const fpioa_func_cfg_t g_func_describ_array[] = {
     { BOOT0, "BOOT0", 0x10F },
@@ -376,7 +380,10 @@ static inline int drv_fpioa_set_iomux(int pin, uint32_t value)
     if (NULL == mmap_iomux()) {
         return -1;
     }
+
+    pthread_mutex_lock(&g_fpioa_lock);
     *(iomux_reg + pin) = (*(iomux_reg + pin) & 0x200) | value;
+    pthread_mutex_unlock(&g_fpioa_lock);
 
     return 0;
 }
@@ -424,7 +431,10 @@ static inline int drv_fpioa_set_pmu_iomux(int pin, uint32_t value)
     }
 
     data                   = convert_iomux_to_pmu(value);
+
+    pthread_mutex_lock(&g_fpioa_lock);
     *(pmu_iomux_reg + pin) = (*(pmu_iomux_reg + pin) & 0x200) | data;
+    pthread_mutex_unlock(&g_fpioa_lock);
 
     return 0;
 }
