@@ -26,7 +26,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <errno.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -36,15 +35,27 @@
 
 #define DRV_WDT_DEV "/dev/watchdog1"
 
-#define KD_DEVICE_CTRL_WDT_GET_TIMEOUT _IOW('W', 1, int) /* get timeout(in seconds) */
-#define KD_DEVICE_CTRL_WDT_SET_TIMEOUT _IOW('W', 2, int) /* set timeout(in seconds) */
-// #define KD_DEVICE_CTRL_WDT_GET_TIMELEFT   _IOW('W', 3, int) /* get the left time before reboot(in seconds) */
-#define KD_DEVICE_CTRL_WDT_KEEPALIVE _IOW('W', 4, int) /* refresh watchdog */
-#define KD_DEVICE_CTRL_WDT_START     _IOW('W', 5, int) /* start watchdog */
-#define KD_DEVICE_CTRL_WDT_STOP      _IOW('W', 6, int) /* stop watchdog */
-// #define KD_DEVICE_CTRL_WDT_SET_PRETIMEOUT _IOW('W', 7, int) /* set pretimeout(in seconds) */
+#define KD_DEVICE_CTRL_WDT_START       _IOW('W', 1, int) /* start watchdog */
+#define KD_DEVICE_CTRL_WDT_KEEPALIVE   _IOW('W', 2, int) /* refresh watchdog */
+#define KD_DEVICE_CTRL_WDT_SET_TIMEOUT _IOW('W', 3, int) /* set timeout(in seconds) */
+#define KD_DEVICE_CTRL_WDT_GET_TIMEOUT _IOW('W', 4, int) /* get timeout(in seconds) */
+
+#if 0
+#define KD_DEVICE_CTRL_WDT_GET_TIMELEFT   _IOW('W', 5, int) /* future: get the left time before reboot */
+#define KD_DEVICE_CTRL_WDT_SET_PRETIMEOUT _IOW('W', 6, int) /* future: set pretimeout(in seconds) */
+#endif
 
 static int _drv_wdt_fd = -1;
+
+int wdt_close(void)
+{
+    if (_drv_wdt_fd >= 0) {
+        close(_drv_wdt_fd);
+        _drv_wdt_fd = -1;
+    }
+
+    return 0;
+}
 
 static int wdt_ioctl(int cmd, void* arg)
 {
@@ -92,14 +103,7 @@ int wdt_start()
     return 0;
 }
 
-int wdt_stop()
-{
-    if (0x00 != wdt_ioctl(KD_DEVICE_CTRL_WDT_STOP, NULL)) {
-        printf("[hal_wdt]: stop wdt failed\n");
-        return -1;
-    }
-    return 0;
-}
+int wdt_stop(void) { return 0; }
 
 int wdt_feed()
 {

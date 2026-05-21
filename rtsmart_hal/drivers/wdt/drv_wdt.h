@@ -29,15 +29,22 @@
 extern "C" {
 #endif
 
-#include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 
-int wdt_set_timeout(uint32_t timeout_sec);
+#if defined(__GNUC__) || defined(__clang__)
+#define KD_WDT_DEPRECATED(msg) __attribute__((deprecated(msg)))
+#else
+#define KD_WDT_DEPRECATED(msg)
+#endif
+
+int      wdt_set_timeout(uint32_t timeout_sec);
 uint32_t wdt_get_timeout(void);
 
+/* Close releases the userspace handle and hands feeding back to the kernel. */
+int wdt_close(void);
 int wdt_start();
-int wdt_stop();
+/* Kept only for compatibility; userspace stop is unsupported. */
+KD_WDT_DEPRECATED("wdt_stop() is a no-op; use wdt_close() to release the handle") int wdt_stop(void);
 
 int wdt_feed();
 
