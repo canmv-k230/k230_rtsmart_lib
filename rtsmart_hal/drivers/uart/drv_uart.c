@@ -169,7 +169,7 @@ void drv_uart_inst_destroy(drv_uart_inst_t** inst)
  *         -1: Invalid parameters
  *         -2: Read error
  */
-size_t drv_uart_read(drv_uart_inst_t* inst, uint8_t* buffer, size_t size)
+ssize_t drv_uart_read(drv_uart_inst_t* inst, uint8_t* buffer, size_t size)
 {
     /* Parameter validation */
     if (inst == NULL || inst->fd == -1 || buffer == NULL) {
@@ -180,7 +180,7 @@ size_t drv_uart_read(drv_uart_inst_t* inst, uint8_t* buffer, size_t size)
     }
 
     /* Perform read operation */
-    size_t bytes_read = read(inst->fd, (void*)buffer, size);
+    ssize_t bytes_read = read(inst->fd, (void*)buffer, size);
     if (bytes_read < 0) {
         return -2;
     }
@@ -197,7 +197,7 @@ size_t drv_uart_read(drv_uart_inst_t* inst, uint8_t* buffer, size_t size)
  *         -1: Invalid parameters
  *         -2: Write error
  */
-size_t drv_uart_write(drv_uart_inst_t* inst, const uint8_t* buffer, size_t size)
+ssize_t drv_uart_write(drv_uart_inst_t* inst, const uint8_t* buffer, size_t size)
 {
     /* Parameter validation */
     if (inst == NULL || inst->fd == -1 || buffer == NULL) {
@@ -208,7 +208,7 @@ size_t drv_uart_write(drv_uart_inst_t* inst, const uint8_t* buffer, size_t size)
     }
 
     /* Perform write operation */
-    size_t bytes_written = write(inst->fd, buffer, size);
+    ssize_t bytes_written = write(inst->fd, buffer, size);
     if (bytes_written < 0) {
         return -2;
     }
@@ -259,7 +259,7 @@ int drv_uart_poll(drv_uart_inst_t* inst, int timeout_ms)
  *         -1: Invalid parameters
  *         -2: IOCTL error
  */
-size_t drv_uart_recv_available(drv_uart_inst_t* inst)
+ssize_t drv_uart_recv_available(drv_uart_inst_t* inst)
 {
     /* Parameter validation */
     if (inst == NULL || inst->fd == -1) {

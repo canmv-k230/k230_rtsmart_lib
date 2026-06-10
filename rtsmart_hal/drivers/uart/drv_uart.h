@@ -33,6 +33,7 @@ extern "C" {
 #include <stdint.h>
 
 #include <sys/time.h>
+#include <sys/types.h>
 
 #define KD_HARD_UART_MAX_NUM (5)
 
@@ -83,12 +84,12 @@ typedef struct _drv_uart_inst {
 int  _drv_uart_inst_create(int id, const char* dev, drv_uart_inst_t** inst);
 void drv_uart_inst_destroy(drv_uart_inst_t** inst);
 
-size_t drv_uart_read(drv_uart_inst_t* inst, uint8_t* buffer, size_t size);
-size_t drv_uart_write(drv_uart_inst_t* inst, const uint8_t* buffer, size_t size);
+ssize_t drv_uart_read(drv_uart_inst_t* inst, uint8_t* buffer, size_t size);
+ssize_t drv_uart_write(drv_uart_inst_t* inst, const uint8_t* buffer, size_t size);
 
 int drv_uart_poll(drv_uart_inst_t* inst, int timeout_ms);
 
-size_t drv_uart_recv_available(drv_uart_inst_t* inst);
+ssize_t drv_uart_recv_available(drv_uart_inst_t* inst);
 
 int drv_uart_configure_buffer_size(int id, uint16_t size);
 
