@@ -1,0 +1,62 @@
+diff --git a/lib/plat/unix/unix-misc.c b/lib/plat/unix/unix-misc.c
+index fce5e4297..4c1fb993a 100644
+--- a/lib/plat/unix/unix-misc.c
++++ b/lib/plat/unix/unix-misc.c
+@@ -65,10 +65,16 @@ lws_get_random(struct lws_context *context, void *buf, size_t len)
+ #if defined(__COVERITY__)
+ 	memset(buf, 0, len);
+ 	return len;
++#else
++#if defined(LWS_PLAT_RTSMART) && defined(LWS_WITH_MBEDTLS) && \
++	!defined(LWS_HAVE_MBEDTLS_V4)
++	/* RT-Smart /dev/urandom may short-read; use lws' seeded mbedTLS DRBG. */
++	return mbedtls_ctr_drbg_random(&context->mcdc, buf, len) == 0 ? len : 0;
+ #else
+ 	/* coverity[tainted_scalar] */
+ 	return (size_t)read(context->fd_random, (char *)buf, len);
+ #endif
++#endif
+ }
+ 
+ void lwsl_emit_syslog(int level, const char *line)
+diff --git a/lib/plat/unix/unix-service.c b/lib/plat/unix/unix-service.c
+index 666084005..cde811aaf 100644
+--- a/lib/plat/unix/unix-service.c
++++ b/lib/plat/unix/unix-service.c
+@@ -101,12 +101,18 @@ _lws_plat_service_tsi(struct lws_context *context, int timeout_ms, int tsi)
+ 	pt = &context->pt[tsi];
+ 	vpt = (volatile struct lws_context_per_thread *)pt;
+ 
++#if defined(LWS_PLAT_RTSMART)
++	if (timeout_ms < 0)
++		timeout_ms = 0;
++	timeout_us = ((lws_usec_t)timeout_ms) * LWS_US_PER_MS;
++#else
+ 	if (timeout_ms < 0)
+ 		timeout_ms = 0;
+ 	else
+ 		/* force a default timeout of 23 days */
+ 		timeout_ms = LWS_POLL_WAIT_LIMIT;
+ 	timeout_us = ((lws_usec_t)timeout_ms) * LWS_US_PER_MS;
++#endif
+ 
+ 	if (context->event_loop_ops->run_pt)
+ 		context->event_loop_ops->run_pt(context, tsi);
+diff --git a/lib/tls/mbedtls/mbedtls-client.c b/lib/tls/mbedtls/mbedtls-client.c
+index e0c482cfb..31fcff495 100644
+--- a/lib/tls/mbedtls/mbedtls-client.c
++++ b/lib/tls/mbedtls/mbedtls-client.c
+@@ -97,11 +97,12 @@ lws_ssl_client_bio_create(struct lws *wsi)
+ 	if (wsi->a.vhost->tls.alpn)
+ 		alpn_comma = wsi->a.vhost->tls.alpn;
+ 
++	char temp_alpn[128];
++
+ 	if (wsi->stash) {
+ 		if (wsi->stash->cis[CIS_ALPN])
+ 			alpn_comma = wsi->stash->cis[CIS_ALPN];
+ 	} else {
+-		char temp_alpn[128];
+ 		if (lws_hdr_copy(wsi, temp_alpn, sizeof(temp_alpn),
+ 				_WSI_TOKEN_CLIENT_ALPN) > 0)
+ 			alpn_comma = temp_alpn;
