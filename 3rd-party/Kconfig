@@ -94,7 +94,7 @@ menu "RT-Smart 3rd-party Configuration"
         select RTSMART_3RD_PARTY_ENABLE_MBEDTLS
 
         if RTSMART_3RD_PARTY_ENABLE_LIBWEBSOCKETS
-            source "$(SDK_RTSMART_SRC_DIR)/libs/3rd-party/libwebsockets/libwebsockets/Kconfig"
+            source "$(SDK_RTSMART_SRC_DIR)/libs/3rd-party/libwebsockets/Kconfig"
         endif
 
 endmenu
