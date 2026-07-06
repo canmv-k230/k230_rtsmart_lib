@@ -72,6 +72,8 @@ typedef struct DtlsSrtp {
   size_t reasm_len;        // Total reassembled data length
   size_t reasm_off;        // Current return offset for chunked delivery
 
+  int cert_cached;         // 1 = cert/pkey/entropy/ctr_drbg already generated, skip regen
+
   void* user_data;
 
 } DtlsSrtp;

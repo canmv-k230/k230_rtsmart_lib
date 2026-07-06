@@ -166,18 +166,34 @@ int dtls_srtp_init(DtlsSrtp* dtls_srtp, DtlsSrtpRole role, void* user_data) {
   dtls_srtp->reasm_len = 0;
   dtls_srtp->reasm_off = 0;
 
+  /* Free previous ssl/conf/cookie before re-init (needed on 2nd+ call).
+   * Safe to call on zeroed structs (first call) — mbedtls treats NULL as no-op. */
+  mbedtls_ssl_free(&dtls_srtp->ssl);
+  mbedtls_ssl_config_free(&dtls_srtp->conf);
+  if (dtls_srtp->cert_cached && dtls_srtp->role == DTLS_SRTP_ROLE_SERVER) {
+    mbedtls_ssl_cookie_free(&dtls_srtp->cookie_ctx);
+  }
+
   mbedtls_ssl_config_init(&dtls_srtp->conf);
   mbedtls_ssl_init(&dtls_srtp->ssl);
 
-  mbedtls_x509_crt_init(&dtls_srtp->cert);
-  mbedtls_pk_init(&dtls_srtp->pkey);
-  mbedtls_entropy_init(&dtls_srtp->entropy);
-  mbedtls_ctr_drbg_init(&dtls_srtp->ctr_drbg);
+  if (!dtls_srtp->cert_cached) {
+    /* First call: generate self-signed cert (slow — RSA-1024 key gen ~1-2s on K230).
+     * This cert+key is valid for the lifetime of the PeerConnection and can be
+     * reused across multiple offer/answer rounds (WebRTC standard allows this). */
+    mbedtls_x509_crt_init(&dtls_srtp->cert);
+    mbedtls_pk_init(&dtls_srtp->pkey);
+    mbedtls_entropy_init(&dtls_srtp->entropy);
+    mbedtls_ctr_drbg_init(&dtls_srtp->ctr_drbg);
+    dtls_srtp_selfsign_cert(dtls_srtp);
+    dtls_srtp->cert_cached = 1;
+  }
+  /* Subsequent calls: cert/pkey/entropy/ctr_drbg are reused as-is. */
+
 #if CONFIG_MBEDTLS_DEBUG
   mbedtls_debug_set_threshold(3);
   mbedtls_ssl_conf_dbg(&dtls_srtp->conf, dtls_srtp_debug, NULL);
 #endif
-  dtls_srtp_selfsign_cert(dtls_srtp);
 
   mbedtls_ssl_conf_verify(&dtls_srtp->conf, dtls_srtp_cert_verify, NULL);
 
@@ -240,6 +256,7 @@ void dtls_srtp_deinit(DtlsSrtp* dtls_srtp) {
   mbedtls_pk_free(&dtls_srtp->pkey);
   mbedtls_entropy_free(&dtls_srtp->entropy);
   mbedtls_ctr_drbg_free(&dtls_srtp->ctr_drbg);
+  dtls_srtp->cert_cached = 0;
 
   if (dtls_srtp->role == DTLS_SRTP_ROLE_SERVER) {
     mbedtls_ssl_cookie_free(&dtls_srtp->cookie_ctx);
