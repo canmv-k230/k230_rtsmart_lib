@@ -300,7 +300,7 @@ void peer_connection_destroy(PeerConnection* pc) {
 }
 
 void peer_connection_close(PeerConnection* pc) {
-  pc->state = PEER_CONNECTION_CLOSED;
+  STATE_CHANGED(pc, PEER_CONNECTION_CLOSED);
 }
 
 int peer_connection_send_audio(PeerConnection* pc, const uint8_t* buf, size_t len, uint64_t timestamp_us) {
@@ -484,6 +484,7 @@ int peer_connection_loop(PeerConnection* pc) {
       if (CONFIG_KEEPALIVE_TIMEOUT > 0 && (ports_get_epoch_time() - pc->agent.binding_request_time) > CONFIG_KEEPALIVE_TIMEOUT) {
         LOGI("binding request timeout");
         STATE_CHANGED(pc, PEER_CONNECTION_CLOSED);
+        break;
       }
 
       if (pc->agent.turn_relay_ready && (ports_get_epoch_time() - pc->agent.turn_allocation_time) > 540000) {
@@ -569,6 +570,16 @@ static const char* peer_connection_create_sdp(PeerConnection* pc, SdpType sdp_ty
   switch (sdp_type) {
     case SDP_TYPE_OFFER:
       role = DTLS_SRTP_ROLE_SERVER;
+      if (pc->agent.turn_relay_ready || pc->agent.turn_server_addr.family != 0) {
+        LOGI("New offer: releasing previous TURN allocation before re-gathering candidates");
+        agent_turn_deallocate(&pc->agent);
+        /* Close and reopen the UDP socket to get a new source port.
+         * This guarantees a different 5-tuple (src_ip:NEW_port → turn_ip:turn_port),
+         * so the new Allocate request cannot conflict with the just-released
+         * allocation on the TURN server — eliminating the 437 Mismatch error
+         * that occurs when the server hasn't fully processed the deallocation. */
+        agent_reopen_udp_socket(&pc->agent);
+      }
       agent_clear_candidates(&pc->agent);
       pc->agent.mode = AGENT_MODE_CONTROLLING;
       break;

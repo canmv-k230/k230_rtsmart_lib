@@ -1,6 +1,7 @@
 #ifndef DISABLE_PEER_SIGNALING
 #include <assert.h>
 #include <cJSON.h>
+#include <pthread.h>
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
@@ -67,6 +68,20 @@ typedef struct PeerSignaling {
 } PeerSignaling;
 
 static PeerSignaling g_ps = {0};
+
+/* Recursive mutex to serialize all MQTT operations — coreMQTT is not thread-safe.
+ * Threads that access MQTT: signaling_thread (ProcessLoop), heartbeat_thread
+ * (Publish), connection_thread (Publish via onicecandidate).
+ * Recursive because MQTT_ProcessLoop callback (on_pub_event) calls
+ * peer_signaling_mqtt_publish which also needs the mutex. */
+static pthread_mutex_t g_mqtt_mutex;
+static pthread_mutexattr_t g_mqtt_mutex_attr;
+
+__attribute__((constructor)) static void mqtt_mutex_init(void) {
+  pthread_mutexattr_init(&g_mqtt_mutex_attr);
+  pthread_mutexattr_settype(&g_mqtt_mutex_attr, PTHREAD_MUTEX_RECURSIVE);
+  pthread_mutex_init(&g_mqtt_mutex, &g_mqtt_mutex_attr);
+}
 
 static int peer_signaling_resolve_token(const char* token, char* username, char* password) {
   char plaintext[TOKEN_MAX_LEN] = {0};
@@ -151,7 +166,10 @@ static void peer_signaling_mqtt_publish(MQTTContext_t* mqtt_ctx, const char* mes
   pub_info.pPayload = message;
   pub_info.payloadLength = strlen(message);
 
+  pthread_mutex_lock(&g_mqtt_mutex);
   status = MQTT_Publish(mqtt_ctx, &pub_info, MQTT_GetPacketId(mqtt_ctx));
+  pthread_mutex_unlock(&g_mqtt_mutex);
+
   if (status != MQTTSuccess) {
     LOGE("MQTT_Publish failed: Status=%s.", MQTT_Status_strerror(status));
   } else {
@@ -416,6 +434,8 @@ static int peer_signaling_mqtt_connect(const char* hostname, int port) {
   g_ps.transport.pNetworkContext = &g_ps.net_ctx;
   g_ps.mqtt_fixed_buf.pBuffer = g_ps.mqtt_buf;
   g_ps.mqtt_fixed_buf.size = sizeof(g_ps.mqtt_buf);
+
+  pthread_mutex_lock(&g_mqtt_mutex);
   status = MQTT_Init(&g_ps.mqtt_ctx, &g_ps.transport,
                      ports_get_epoch_time, peer_signaling_mqtt_event_cb, &g_ps.mqtt_fixed_buf);
 
@@ -440,6 +460,7 @@ static int peer_signaling_mqtt_connect(const char* hostname, int port) {
 
   status = MQTT_Connect(&g_ps.mqtt_ctx,
                         &conn_info, NULL, CONNACK_RECV_TIMEOUT_MS, &session_present);
+  pthread_mutex_unlock(&g_mqtt_mutex);
 
   if (status != MQTTSuccess) {
     LOGE("MQTT_Connect failed: Status=%s.", MQTT_Status_strerror(status));
@@ -454,12 +475,13 @@ static int peer_signaling_mqtt_subscribe(int subscribed) {
   MQTTStatus_t status = MQTTSuccess;
   MQTTSubscribeInfo_t sub_info;
 
-  uint16_t packet_id = MQTT_GetPacketId(&g_ps.mqtt_ctx);
-
   memset(&sub_info, 0, sizeof(sub_info));
   sub_info.qos = MQTTQoS0;
   sub_info.pTopicFilter = g_ps.subtopic;
   sub_info.topicFilterLength = strlen(g_ps.subtopic);
+
+  pthread_mutex_lock(&g_mqtt_mutex);
+  uint16_t packet_id = MQTT_GetPacketId(&g_ps.mqtt_ctx);
 
   if (subscribed) {
     LOGI("Subscribing topic %s", g_ps.subtopic);
@@ -468,11 +490,13 @@ static int peer_signaling_mqtt_subscribe(int subscribed) {
     status = MQTT_Unsubscribe(&g_ps.mqtt_ctx, &sub_info, 1, packet_id);
   }
   if (status != MQTTSuccess) {
+    pthread_mutex_unlock(&g_mqtt_mutex);
     LOGE("MQTT_Subscribe failed: Status=%s.", MQTT_Status_strerror(status));
     return -1;
   }
 
   status = MQTT_ProcessLoop(&g_ps.mqtt_ctx);
+  pthread_mutex_unlock(&g_mqtt_mutex);
 
   if (status != MQTTSuccess) {
     LOGE("MQTT_ProcessLoop failed: Status=%s.", MQTT_Status_strerror(status));
@@ -554,7 +578,9 @@ void peer_signaling_disconnect() {
 
   if (!g_ps.proto && g_ps.mqtt_fixed_buf.pBuffer != NULL) {
     peer_signaling_mqtt_subscribe(0);
+    pthread_mutex_lock(&g_mqtt_mutex);
     status = MQTT_Disconnect(&g_ps.mqtt_ctx);
+    pthread_mutex_unlock(&g_mqtt_mutex);
     if (status != MQTTSuccess) {
       LOGE("Failed to disconnect with broker: %s", MQTT_Status_strerror(status));
     }
@@ -572,11 +598,40 @@ int peer_signaling_reconnect() {
 
   LOGI("Reconnecting to MQTT broker %s:%d ...", g_ps.host, g_ps.port);
 
-  // Tear down existing session (only if MQTT was previously initialized)
-  if (g_ps.mqtt_fixed_buf.pBuffer != NULL) {
-    MQTT_Disconnect(&g_ps.mqtt_ctx);
-  }
+  /* Tear down order matters to avoid EMQX takeover:
+   *
+   * 1. Close the TCP socket FIRST — this causes EMQX to immediately detect
+   *    the old connection is gone (TCP FIN/RST), so it cleans up the old
+   *    session before the new CONNECT arrives.
+   *
+   * 2. Then call MQTT_Disconnect to clear the local MQTT state.  Since the
+   *    socket is already closed, MQTT_Disconnect cannot send a DISCONNECT
+   *    packet (the send will fail, which is fine — we're tearing down).
+   *
+   * 3. Wait briefly for EMQX to finish cleaning up the old session.
+   *    Without this wait, a new CONNECT with the same client_id may arrive
+   *    while EMQX still holds the old session, triggering a "takenover"
+   *    shutdown that sends RST to the old socket — which the device may
+   *    still be reading on, causing MQTTRecvFailed and another reconnect
+   *    attempt (infinite loop).
+   *
+   * Previous (buggy) order was: MQTT_Disconnect → ssl_transport_disconnect →
+   * connect.  The problem was that MQTT_Disconnect tried to send a
+   * DISCONNECT packet on the old socket (which might already be broken),
+   * and the new CONNECT could arrive before EMQX processed the old
+   * socket close, triggering takeover. */
   ssl_transport_disconnect(&g_ps.net_ctx);
+
+  if (g_ps.mqtt_fixed_buf.pBuffer != NULL) {
+    pthread_mutex_lock(&g_mqtt_mutex);
+    MQTT_Disconnect(&g_ps.mqtt_ctx);
+    pthread_mutex_unlock(&g_mqtt_mutex);
+  }
+
+  /* Give EMQX time to clean up the old session (typically <50ms on LAN,
+   * but allow 200ms for WAN/4G latency).  This prevents the new CONNECT
+   * from triggering a takeover on a still-active old session. */
+  usleep(200000);
 
   // Re-establish: TLS connect → MQTT connect → subscribe
   if (peer_signaling_mqtt_connect(g_ps.host, g_ps.port) < 0) {
@@ -594,7 +649,10 @@ int peer_signaling_reconnect() {
 }
 
 int peer_signaling_loop() {
-  MQTTStatus_t status = MQTT_ProcessLoop(&g_ps.mqtt_ctx);
+  MQTTStatus_t status;
+  pthread_mutex_lock(&g_mqtt_mutex);
+  status = MQTT_ProcessLoop(&g_ps.mqtt_ctx);
+  pthread_mutex_unlock(&g_mqtt_mutex);
   return (int)status;
 }
 
@@ -620,8 +678,10 @@ int peer_signaling_publish(const char* topic, const char* message) {
   pub_info.pPayload = message;
   pub_info.payloadLength = strlen(message);
 
+  pthread_mutex_lock(&g_mqtt_mutex);
   status = MQTT_Publish(&g_ps.mqtt_ctx, &pub_info,
                         MQTT_GetPacketId(&g_ps.mqtt_ctx));
+  pthread_mutex_unlock(&g_mqtt_mutex);
 
   if (status != MQTTSuccess) {
     LOGE("peer_signaling_publish failed: topic=%s status=%s",

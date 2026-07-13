@@ -236,59 +236,132 @@ static int agent_create_stun_addr(Agent* agent, Address* serv_addr) {
   return ret;
 }
 
+#define TURN_ALLOCATE_MAX_RETRIES 2
+
 static int agent_create_turn_addr(Agent* agent, Address* serv_addr, const char* username, const char* credential) {
   int ret = -1;
   uint32_t attr = ntohl(0x11000000);
   Address turn_addr;
   StunMessage send_msg;
   StunMessage recv_msg;
-  memset(&recv_msg, 0, sizeof(recv_msg));
-  memset(&send_msg, 0, sizeof(send_msg));
-  stun_msg_create(&send_msg, STUN_METHOD_ALLOCATE);
-  stun_msg_write_attr(&send_msg, STUN_ATTR_TYPE_REQUESTED_TRANSPORT, sizeof(attr), (char*)&attr);
+  int attempt;
 
-  StunHeader* first_header = (StunHeader*)send_msg.buf;
-  uint32_t first_txn_id[3];
-  memcpy(first_txn_id, first_header->transaction_id, sizeof(first_txn_id));
-
-  ret = agent_socket_send(agent, serv_addr, send_msg.buf, send_msg.size);
-  if (ret == -1) {
-    LOGE("Failed to send TURN Allocate Request.");
-    return -1;
-  }
-
-  ret = agent_socket_recv_attempts(agent, NULL, recv_msg.buf, sizeof(recv_msg.buf), AGENT_STUN_RECV_MAXTIMES);
-  if (ret <= 0) {
-    LOGD("Failed to receive TURN Allocate Response.");
-    return ret;
-  }
-
-  stun_parse_msg_buf(&recv_msg);
-
-  if (recv_msg.stunclass == STUN_CLASS_ERROR && recv_msg.stunmethod == STUN_METHOD_ALLOCATE) {
-    if (recv_msg.error_code != 401 && recv_msg.error_code != 438) {
-      LOGE("TURN Allocate failed (error code: %d), not retrying.", recv_msg.error_code);
-      return -1;
-    }
-    if (strlen(recv_msg.nonce) == 0 || strlen(recv_msg.realm) == 0) {
-      LOGE("TURN Allocate 401 missing NONCE/REALM.");
-      return -1;
-    }
-    strncpy(agent->turn_nonce, recv_msg.nonce, sizeof(agent->turn_nonce) - 1);
-    strncpy(agent->turn_realm, recv_msg.realm, sizeof(agent->turn_realm) - 1);
+  for (attempt = 0; attempt < TURN_ALLOCATE_MAX_RETRIES; attempt++) {
+    memset(&recv_msg, 0, sizeof(recv_msg));
     memset(&send_msg, 0, sizeof(send_msg));
-    stun_msg_create(&send_msg, STUN_CLASS_REQUEST | STUN_METHOD_ALLOCATE);
+    stun_msg_create(&send_msg, STUN_METHOD_ALLOCATE);
     stun_msg_write_attr(&send_msg, STUN_ATTR_TYPE_REQUESTED_TRANSPORT, sizeof(attr), (char*)&attr);
-    stun_msg_write_attr(&send_msg, STUN_ATTR_TYPE_USERNAME, strlen(username), (char*)username);
-    stun_msg_write_attr(&send_msg, STUN_ATTR_TYPE_NONCE, strlen(recv_msg.nonce), recv_msg.nonce);
-    stun_msg_write_attr(&send_msg, STUN_ATTR_TYPE_REALM, strlen(recv_msg.realm), recv_msg.realm);
-    stun_msg_finish(&send_msg, STUN_CREDENTIAL_LONG_TERM, credential, strlen(credential));
-  } else if (recv_msg.stunclass == STUN_CLASS_RESPONSE && recv_msg.stunmethod == STUN_METHOD_ALLOCATE) {
-    StunHeader* resp_header = (StunHeader*)recv_msg.buf;
-    if (memcmp(resp_header->transaction_id, first_txn_id, sizeof(first_txn_id)) != 0) {
-      LOGE("TURN Allocate response transaction ID mismatch.");
+
+    StunHeader* first_header = (StunHeader*)send_msg.buf;
+    uint32_t first_txn_id[3];
+    memcpy(first_txn_id, first_header->transaction_id, sizeof(first_txn_id));
+
+    ret = agent_socket_send(agent, serv_addr, send_msg.buf, send_msg.size);
+    if (ret == -1) {
+      LOGE("Failed to send TURN Allocate Request.");
       return -1;
     }
+
+    ret = agent_socket_recv_attempts(agent, NULL, recv_msg.buf, sizeof(recv_msg.buf), AGENT_STUN_RECV_MAXTIMES);
+    if (ret <= 0) {
+      LOGD("Failed to receive TURN Allocate Response.");
+      return ret;
+    }
+
+    stun_parse_msg_buf(&recv_msg);
+
+    if (recv_msg.stunclass == STUN_CLASS_ERROR && recv_msg.stunmethod == STUN_METHOD_ALLOCATE) {
+      if (recv_msg.error_code == 437) {
+        /* Allocation Mismatch: the TURN server still considers the 5-tuple
+         * as having an active allocation.  Close and reopen the UDP socket
+         * to obtain a new source port (new 5-tuple), then retry. */
+        LOGE("TURN Allocate 437 (Allocation Mismatch), reopening socket (attempt %d/%d)",
+             attempt + 1, TURN_ALLOCATE_MAX_RETRIES);
+        agent_reopen_udp_socket(agent);
+        continue;   /* retry from the top with new 5-tuple */
+      }
+      if (recv_msg.error_code != 401 && recv_msg.error_code != 438) {
+        LOGE("TURN Allocate failed (error code: %d), not retrying.", recv_msg.error_code);
+        return -1;
+      }
+      if (strlen(recv_msg.nonce) == 0 || strlen(recv_msg.realm) == 0) {
+        LOGE("TURN Allocate 401 missing NONCE/REALM.");
+        return -1;
+      }
+      strncpy(agent->turn_nonce, recv_msg.nonce, sizeof(agent->turn_nonce) - 1);
+      strncpy(agent->turn_realm, recv_msg.realm, sizeof(agent->turn_realm) - 1);
+      memset(&send_msg, 0, sizeof(send_msg));
+      stun_msg_create(&send_msg, STUN_CLASS_REQUEST | STUN_METHOD_ALLOCATE);
+      stun_msg_write_attr(&send_msg, STUN_ATTR_TYPE_REQUESTED_TRANSPORT, sizeof(attr), (char*)&attr);
+      stun_msg_write_attr(&send_msg, STUN_ATTR_TYPE_USERNAME, strlen(username), (char*)username);
+      stun_msg_write_attr(&send_msg, STUN_ATTR_TYPE_NONCE, strlen(recv_msg.nonce), recv_msg.nonce);
+      stun_msg_write_attr(&send_msg, STUN_ATTR_TYPE_REALM, strlen(recv_msg.realm), recv_msg.realm);
+      stun_msg_finish(&send_msg, STUN_CREDENTIAL_LONG_TERM, credential, strlen(credential));
+    } else if (recv_msg.stunclass == STUN_CLASS_RESPONSE && recv_msg.stunmethod == STUN_METHOD_ALLOCATE) {
+      StunHeader* resp_header = (StunHeader*)recv_msg.buf;
+      if (memcmp(resp_header->transaction_id, first_txn_id, sizeof(first_txn_id)) != 0) {
+        LOGE("TURN Allocate response transaction ID mismatch.");
+        return -1;
+      }
+      memcpy(&turn_addr, &recv_msg.relayed_addr, sizeof(Address));
+      IceCandidate* ice_candidate = agent->local_candidates + agent->local_candidates_count++;
+      ice_candidate_create(ice_candidate, agent->local_candidates_count, ICE_CANDIDATE_TYPE_RELAY, &turn_addr);
+      memcpy(&ice_candidate->raddr, &recv_msg.mapped_addr, sizeof(Address));
+      memcpy(&agent->turn_server_addr, serv_addr, sizeof(Address));
+      agent->turn_allocation_time = ports_get_epoch_time();
+      strncpy(agent->turn_username, username, sizeof(agent->turn_username) - 1);
+      strncpy(agent->turn_credential, credential, sizeof(agent->turn_credential) - 1);
+      LOGI("TURN allocation succeeded (no auth needed)");
+      return ret;
+    } else {
+      LOGE("Invalid TURN Allocate Response.");
+      return -1;
+    }
+
+    /* --- Authenticated retry (after 401/438) --- */
+    uint32_t retry_txn_id[3];
+    {
+      StunHeader* retry_header = (StunHeader*)send_msg.buf;
+      memcpy(retry_txn_id, retry_header->transaction_id, sizeof(retry_txn_id));
+    }
+
+    ret = agent_socket_send(agent, serv_addr, send_msg.buf, send_msg.size);
+    if (ret < 0) {
+      LOGE("Failed to send TURN Allocate Request (with auth).");
+      return -1;
+    }
+
+    memset(&recv_msg, 0, sizeof(recv_msg));
+    ret = agent_socket_recv_attempts(agent, NULL, recv_msg.buf, sizeof(recv_msg.buf), AGENT_STUN_RECV_MAXTIMES);
+    if (ret <= 0) {
+      LOGD("Failed to receive TURN Allocate Response (with auth).");
+      return ret;
+    }
+
+    stun_parse_msg_buf(&recv_msg);
+
+    if (recv_msg.stunclass == STUN_CLASS_ERROR && recv_msg.stunmethod == STUN_METHOD_ALLOCATE) {
+      if (recv_msg.error_code == 437) {
+        LOGW("TURN Allocate 437 after auth, reopening socket (attempt %d/%d)",
+             attempt + 1, TURN_ALLOCATE_MAX_RETRIES);
+        agent_reopen_udp_socket(agent);
+        continue;   /* retry from the top with new 5-tuple */
+      }
+      LOGE("TURN Allocate failed (auth error, code=%d).", recv_msg.error_code);
+      return -1;
+    }
+
+    if (recv_msg.stunclass == STUN_CLASS_ERROR) {
+      LOGE("TURN Allocate failed (auth error).");
+      return -1;
+    }
+
+    StunHeader* retry_resp_header = (StunHeader*)recv_msg.buf;
+    if (memcmp(retry_resp_header->transaction_id, retry_txn_id, sizeof(retry_txn_id)) != 0) {
+      LOGE("TURN Allocate retry response transaction ID mismatch.");
+      return -1;
+    }
+
     memcpy(&turn_addr, &recv_msg.relayed_addr, sizeof(Address));
     IceCandidate* ice_candidate = agent->local_candidates + agent->local_candidates_count++;
     ice_candidate_create(ice_candidate, agent->local_candidates_count, ICE_CANDIDATE_TYPE_RELAY, &turn_addr);
@@ -297,53 +370,12 @@ static int agent_create_turn_addr(Agent* agent, Address* serv_addr, const char* 
     agent->turn_allocation_time = ports_get_epoch_time();
     strncpy(agent->turn_username, username, sizeof(agent->turn_username) - 1);
     strncpy(agent->turn_credential, credential, sizeof(agent->turn_credential) - 1);
-    LOGI("TURN allocation succeeded (no auth needed)");
+    LOGI("TURN allocation succeeded (with auth)");
     return ret;
-  } else {
-    LOGE("Invalid TURN Allocate Response.");
-    return -1;
-  }
+  } /* end retry loop */
 
-  StunHeader* retry_header = (StunHeader*)send_msg.buf;
-  uint32_t retry_txn_id[3];
-  memcpy(retry_txn_id, retry_header->transaction_id, sizeof(retry_txn_id));
-
-  ret = agent_socket_send(agent, serv_addr, send_msg.buf, send_msg.size);
-  if (ret < 0) {
-    LOGE("Failed to send TURN Allocate Request (with auth).");
-    return -1;
-  }
-
-  memset(&recv_msg, 0, sizeof(recv_msg));
-  ret = agent_socket_recv_attempts(agent, NULL, recv_msg.buf, sizeof(recv_msg.buf), AGENT_STUN_RECV_MAXTIMES);
-  if (ret <= 0) {
-    LOGD("Failed to receive TURN Allocate Response (with auth).");
-    return ret;
-  }
-
-  stun_parse_msg_buf(&recv_msg);
-
-  if (recv_msg.stunclass == STUN_CLASS_ERROR) {
-    LOGE("TURN Allocate failed (auth error).");
-    return -1;
-  }
-
-  StunHeader* retry_resp_header = (StunHeader*)recv_msg.buf;
-  if (memcmp(retry_resp_header->transaction_id, retry_txn_id, sizeof(retry_txn_id)) != 0) {
-    LOGE("TURN Allocate retry response transaction ID mismatch.");
-    return -1;
-  }
-
-  memcpy(&turn_addr, &recv_msg.relayed_addr, sizeof(Address));
-  IceCandidate* ice_candidate = agent->local_candidates + agent->local_candidates_count++;
-  ice_candidate_create(ice_candidate, agent->local_candidates_count, ICE_CANDIDATE_TYPE_RELAY, &turn_addr);
-  memcpy(&ice_candidate->raddr, &recv_msg.mapped_addr, sizeof(Address));
-  memcpy(&agent->turn_server_addr, serv_addr, sizeof(Address));
-  agent->turn_allocation_time = ports_get_epoch_time();
-  strncpy(agent->turn_username, username, sizeof(agent->turn_username) - 1);
-  strncpy(agent->turn_credential, credential, sizeof(agent->turn_credential) - 1);
-  LOGI("TURN allocation succeeded (with auth)");
-  return ret;
+  LOGE("TURN Allocate failed after %d attempts (437 Allocation Mismatch).", TURN_ALLOCATE_MAX_RETRIES);
+  return -1;
 }
 
 static int agent_is_relay_active(Agent* agent) {
@@ -352,7 +384,7 @@ static int agent_is_relay_active(Agent* agent) {
          agent->nominated_pair->local->type == ICE_CANDIDATE_TYPE_RELAY;
 }
 
-static int agent_turn_send_stun_with_auth(Agent* agent, StunMessage* send_msg, Address* peer_addr, const char* username, const char* credential) {
+static int agent_turn_send_stun_with_auth(Agent* agent, StunMessage* send_msg, Address* peer_addr, const char* username, const char* credential, const uint32_t* refresh_lifetime) {
   StunMessage recv_msg;
   int ret;
   uint16_t original_method;
@@ -431,6 +463,10 @@ static int agent_turn_send_stun_with_auth(Agent* agent, StunMessage* send_msg, A
         memcpy(channel_attr, &channel_net, sizeof(channel_net));
         stun_msg_write_attr(&retry_msg, STUN_ATTR_TYPE_CHANNEL_NUMBER, sizeof(channel_attr), (char*)channel_attr);
       } else if (original_method == STUN_METHOD_REFRESH) {
+        if (refresh_lifetime) {
+          uint32_t lifetime_attr = *refresh_lifetime;
+          stun_msg_write_attr(&retry_msg, STUN_ATTR_TYPE_LIFETIME, sizeof(lifetime_attr), (char*)&lifetime_attr);
+        }
       }
 
       stun_msg_finish(&retry_msg, STUN_CREDENTIAL_LONG_TERM, credential, strlen(credential));
@@ -511,7 +547,7 @@ static int agent_turn_create_permission(Agent* agent, Address* peer_addr, const 
   }
 
   LOGI("Sending TURN CreatePermission for peer");
-  return agent_turn_send_stun_with_auth(agent, &send_msg, peer_addr, username, credential);
+  return agent_turn_send_stun_with_auth(agent, &send_msg, peer_addr, username, credential, NULL);
 }
 
 static int agent_turn_channel_bind(Agent* agent, Address* peer_addr, uint16_t channel_number, const char* username, const char* credential) {
@@ -546,7 +582,7 @@ static int agent_turn_channel_bind(Agent* agent, Address* peer_addr, uint16_t ch
   }
 
   LOGI("Sending TURN ChannelBind for channel 0x%04x", channel_number);
-  return agent_turn_send_stun_with_auth(agent, &send_msg, peer_addr, username, credential);
+  return agent_turn_send_stun_with_auth(agent, &send_msg, peer_addr, username, credential, NULL);
 }
 
 int agent_turn_setup_relay(Agent* agent) {
@@ -720,7 +756,7 @@ int agent_turn_refresh(Agent* agent) {
   memset(&send_msg, 0, sizeof(send_msg));
   stun_msg_create(&send_msg, STUN_CLASS_REQUEST | STUN_METHOD_REFRESH);
 
-  if (agent_turn_send_stun_with_auth(agent, &send_msg, NULL, agent->turn_username, agent->turn_credential) == 0) {
+  if (agent_turn_send_stun_with_auth(agent, &send_msg, NULL, agent->turn_username, agent->turn_credential, NULL) == 0) {
     agent->turn_allocation_time = ports_get_epoch_time();
     LOGI("TURN Refresh succeeded.");
     return 0;
@@ -728,6 +764,66 @@ int agent_turn_refresh(Agent* agent) {
 
   LOGE("TURN Refresh failed.");
   return -1;
+}
+
+int agent_reopen_udp_socket(Agent* agent) {
+  int family = agent->udp_sockets[0].bind_addr.family;
+
+  udp_socket_close(&agent->udp_sockets[0]);
+  memset(&agent->udp_sockets[0], 0, sizeof(agent->udp_sockets[0]));
+
+  if (udp_socket_open(&agent->udp_sockets[0], family, 0) < 0) {
+    LOGE("Failed to reopen UDP socket after TURN deallocate.");
+    return -1;
+  }
+
+  LOGI("Reopened UDP socket (fd=%d, port=%d) — new 5-tuple avoids TURN 437",
+       agent->udp_sockets[0].fd, agent->udp_sockets[0].bind_addr.port);
+  return 0;
+}
+
+int agent_turn_deallocate(Agent* agent) {
+  StunMessage send_msg;
+  uint32_t lifetime_zero = 0;
+  int ret = 0;
+
+  if (!agent->turn_relay_ready && agent->turn_server_addr.family == 0) {
+    /* Nothing was ever allocated on this agent, nothing to release. */
+    return 0;
+  }
+
+  if (agent->turn_server_addr.family == 0) {
+    goto reset_state;
+  }
+
+  memset(&send_msg, 0, sizeof(send_msg));
+  stun_msg_create(&send_msg, STUN_CLASS_REQUEST | STUN_METHOD_REFRESH);
+
+  ret = agent_turn_send_stun_with_auth(agent, &send_msg, NULL, agent->turn_username, agent->turn_credential, &lifetime_zero);
+
+  if (ret == 0) {
+    LOGI("TURN Deallocate (Refresh LIFETIME=0) succeeded.");
+  } else {
+    LOGW("TURN Deallocate failed, clearing local state anyway.");
+  }
+
+reset_state:
+  /* Whether or not the server acked the deallocate, the previous allocation
+   * (and its 5-tuple state) must no longer be treated as usable locally so
+   * the next offer starts a fresh Allocate. If the server did receive the
+   * Refresh, the allocation is gone immediately; if it didn't, it will
+   * simply expire after its LIFETIME and stop matching our new Allocate's
+   * transaction id (which only fails with 437 while it is still alive AND
+   * we reuse the same 5-tuple without deallocating first). */
+  agent->turn_relay_ready = 0;
+  agent->turn_channel_bound = 0;
+  agent->turn_channel = 0;
+  agent->turn_allocation_time = 0;
+  memset(&agent->turn_server_addr, 0, sizeof(agent->turn_server_addr));
+  memset(&agent->turn_peer_addr, 0, sizeof(agent->turn_peer_addr));
+  memset(agent->turn_nonce, 0, sizeof(agent->turn_nonce));
+  memset(agent->turn_realm, 0, sizeof(agent->turn_realm));
+  return ret;
 }
 
 void agent_gather_candidate(Agent* agent, const char* urls, const char* username, const char* credential) {
@@ -878,7 +974,18 @@ void agent_process_stun_response(Agent* agent, StunMessage* stun_msg, Address* s
           if (agent->active_pairs[i]->state == ICE_CANDIDATE_STATE_INPROGRESS &&
               addr_equal(&agent->active_pairs[i]->remote->addr, src_addr)) {
             agent->active_pairs[i]->state = ICE_CANDIDATE_STATE_SUCCEEDED;
-            agent->nominated_pair = agent->active_pairs[i];
+            /* Only update nominated_pair if no pair has been nominated yet.
+             * A late STUN response (e.g. from a relay path arriving after
+             * host→host has already been selected) must not override the
+             * existing nominated_pair, otherwise DTLS data gets routed to
+             * the wrong path and the handshake fails. */
+            if (!agent->nominated_pair ||
+                agent->nominated_pair->state != ICE_CANDIDATE_STATE_SUCCEEDED) {
+              agent->nominated_pair = agent->active_pairs[i];
+            } else {
+              LOGI("Nominated pair already established, keeping current (late response from %s:%d ignored for nomination)",
+                   src_addr);
+            }
             break;
           }
         }

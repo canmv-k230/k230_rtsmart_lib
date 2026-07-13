@@ -118,4 +118,8 @@ int agent_turn_setup_relay(Agent* agent);
 
 int agent_turn_refresh(Agent* agent);
 
+int agent_reopen_udp_socket(Agent* agent);
+
+int agent_turn_deallocate(Agent* agent);
+
 #endif  // AGENT_H_
