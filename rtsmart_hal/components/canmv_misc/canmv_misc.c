@@ -304,3 +304,27 @@ int canmv_misc_get_kernel_build_info(char* out_buf, size_t buf_len)
 
 #undef INFO_MAX_LEN
 }
+
+int canmv_misc_mkfs(const char* mount_path)
+{
+    struct canmv_misc_mkfs_args args = {0};
+    size_t mount_path_len;
+
+    if (!mount_path) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    mount_path_len = strnlen(mount_path, sizeof(args.mount_path));
+    if (!mount_path_len) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (mount_path_len == sizeof(args.mount_path)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+
+    memcpy(args.mount_path, mount_path, mount_path_len);
+    return canmv_misc_dev_ioctl(MISC_DEV_CMD_MKFS, &args);
+}

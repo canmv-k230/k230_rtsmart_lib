@@ -55,6 +55,9 @@
 #define MISC_DEV_CMD_UNREGISTER_TOUCH_DEVICE _IOWR('M', 0x11, void*)
 #define MISC_DEV_CMD_GET_MMZ_ZONE_INFO       _IOWR('M', 0x12, void*)
 #define MISC_DEV_CMD_GET_KERNEL_BUILD_INFO    _IOWR('M', 0x13, void *)
+#define MISC_DEV_CMD_MKFS                     _IOWR('M', 0x14, void *)
+
+#define CANMV_MISC_MKFS_MOUNT_PATH_LEN 32
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,6 +69,10 @@ struct canmv_misc_dev_meminfo_t {
     size_t total_size;
     size_t free_size;
     size_t used_size;
+};
+
+struct canmv_misc_mkfs_args {
+    char mount_path[CANMV_MISC_MKFS_MOUNT_PATH_LEN];
 };
 
 // MISC_DEV_CMD_CREATE_SOFT_I2C
@@ -170,6 +177,8 @@ int canmv_misc_get_mmz_zone_info(size_t* start, size_t* end);
 bool canmv_misc_check_phys_in_mmz_zone(size_t addr, size_t size);
 
 int canmv_misc_get_kernel_build_info(char* out_buf, size_t buf_len);
+
+int canmv_misc_mkfs(const char* mount_path);
 
 #ifdef __cplusplus
 }
