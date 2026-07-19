@@ -29,6 +29,10 @@ CWARN :=
 C_CXX_FLAGS := -Iport -Ilvgl -I$(SDK_SRC_ROOT_DIR)/include 
 C_CXX_FLAGS += -fopenmp -march=rv64imafdcv -mabi=lp64d -mcmodel=medany -Os $(CWARN) $(LIB_CFLAGS)
 
+ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_FREETYPE),y)
+C_CXX_FLAGS += -I$(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include/freetype
+endif
+
 CFLAGS += $(C_CXX_FLAGS) -std=gnu99
 CXXFLAGS += $(C_CXX_FLAGS)
 

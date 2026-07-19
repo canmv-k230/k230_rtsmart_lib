@@ -160,7 +160,7 @@
 /** Stack size of drawing thread.
  * NOTE: If FreeType or ThorVG is enabled, it is recommended to set it to 32KB or more.
  */
-#define LV_DRAW_THREAD_STACK_SIZE    (16 * 1024)         /**< [bytes]*/
+#define LV_DRAW_THREAD_STACK_SIZE    (32 * 1024)         /**< [bytes]*/
 
 /** Thread priority of the drawing task.
  *  Higher values mean higher priority.
@@ -876,9 +876,9 @@
 #endif
 
 /** API for open, read, etc. */
-#define LV_USE_FS_POSIX 0
+#define LV_USE_FS_POSIX 1
 #if LV_USE_FS_POSIX
-    #define LV_FS_POSIX_LETTER '\0'     /**< Set an upper-case driver-identifier letter for this driver (e.g. 'A'). */
+    #define LV_FS_POSIX_LETTER 'S'      /**< Set an upper-case driver-identifier letter for this driver (e.g. 'A'). */
     #define LV_FS_POSIX_PATH ""         /**< Set the working directory. File/directory paths will be appended to it. */
     #define LV_FS_POSIX_CACHE_SIZE 0    /**< >0 to cache this number of bytes in lv_fs_read() */
 #endif
@@ -938,7 +938,7 @@
 #endif
 
 /** LODEPNG decoder library */
-#define LV_USE_LODEPNG 0
+#define LV_USE_LODEPNG 1
 
 /** PNG decoder(libpng) library */
 #define LV_USE_LIBPNG 0
@@ -955,7 +955,7 @@
 #define LV_USE_LIBJPEG_TURBO 0
 
 /** GIF decoder library */
-#define LV_USE_GIF 0
+#define LV_USE_GIF 1
 #if LV_USE_GIF
     /** GIF decoder accelerate */
     #define LV_GIF_CACHE_DECODE_DATA 0
@@ -977,7 +977,12 @@
 #define LV_USE_BARCODE 0
 
 /** FreeType library */
-#define LV_USE_FREETYPE 0
+#if defined(CONFIG_RTSMART_3RD_PARTY_ENABLE_FREETYPE) && \
+    CONFIG_RTSMART_3RD_PARTY_ENABLE_FREETYPE
+    #define LV_USE_FREETYPE 1
+#else
+    #define LV_USE_FREETYPE 0
+#endif
 #if LV_USE_FREETYPE
     /** Let FreeType use LVGL memory and file porting */
     #define LV_FREETYPE_USE_LVGL_PORT 0
