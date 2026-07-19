@@ -18,6 +18,9 @@ CXXFLAGS :=
 
 CFILES += freetype_wrap.c
 
+# Keep the optional BDF module out of this embedded build.  The stroker is
+# required by LVGL's FreeType outline backend, even when the application uses
+# bitmap rendering for its normal text.
 CFILES += \
       freetype/src/base/ftsystem.c \
       freetype/src/base/ftinit.c \
@@ -27,7 +30,6 @@ CFILES += \
       freetype/src/base/ftglyph.c \
       freetype/src/base/ftbitmap.c \
       freetype/src/base/ftmm.c \
-      # freetype/src/base/ftbdf.c \
       freetype/src/base/ftcid.c \
       freetype/src/base/ftfstype.c \
       freetype/src/base/ftgasp.c \
@@ -39,16 +41,18 @@ CFILES += \
       freetype/src/base/ftsynth.c \
       freetype/src/base/fttype1.c \
       freetype/src/base/ftwinfnt.c \
+      # freetype/src/base/ftbdf.c \
 
 CFILES += \
       freetype/src/sfnt/sfnt.c \
       freetype/src/truetype/truetype.c
 
+# The autofit module is not needed by the selected font set.
 CFILES += \
       freetype/src/smooth/smooth.c \
-      # freetype/src/autofit/autofit.c \
       freetype/src/raster/raster.c \
       freetype/src/sdf/sdf.c \
+      # freetype/src/autofit/autofit.c \
 
 CFILES += \
       freetype/src/cache/ftcache.c
