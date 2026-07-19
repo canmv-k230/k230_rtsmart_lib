@@ -1,0 +1,107 @@
+From 4e8b8e3d70fc8637e4f72c4639c70935d42b5cc1 Mon Sep 17 00:00:00 2001
+From: RT-Smart Port <port@libwebsockets.invalid>
+Date: Sat, 18 Jul 2026 08:30:00 +0800
+Subject: [PATCH] rtsmart: add the RT-Smart platform
+
+Select plat/rtsmart as a first-class libwebsockets platform. RT-Smart remains
+Unix-compatible for shared structures and source implementations, while its
+platform directory owns service polling, event-pipe, and random behavior.
+
+Do not advertise pipe2 support on RT-Smart. The toolchain exposes the symbol,
+but the operating system does not implement the syscall behind it.
+
+---
+ CMakeLists.txt              |  3 ++-
+ cmake/lws_config.h.in       |  1 +
+ lib/CMakeLists.txt          | 11 ++++++++++-
+ lib/core/private-lib-core.h |  4 +++-
+ 4 files changed, 16 insertions(+), 3 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -343,6 +343,7 @@ option(LWS_STATIC_PIC "Build the static version of the library with position-i
+ #
+ option(LWS_WITH_ESP32 "Build for ESP32" OFF)
+ option(LWS_PLAT_OPTEE "Build for OPTEE" OFF)
++option(LWS_PLAT_RTSMART "Build for RT-Smart" OFF)
+ option(LWS_PLAT_FREERTOS "Build for FreeRTOS" OFF)
+ option(LWS_PLAT_ANDROID "Android flavour of unix platform" OFF)
+ option(LWS_PLAT_BAREMETAL "Build for deeply embedded baremetal" OFF)
+@@ -400,6 +401,6 @@ option(LWS_WITH_GCOV "Build with gcc gcov coverage instrumentation" OFF)
+ option(LWS_WITH_EXPORT_LWSTARGETS "Export libwebsockets CMake targets.  Disable if they conflict with an outer cmake project." ON)
+ option(LWS_REPRODUCIBLE "Build libwebsockets reproducible. It removes the build user and hostname from the build" ON)
+-if (ESP_PLATFORM OR LWS_WITH_ESP32 OR LWS_PLAT_BAREMETAL OR LWS_PLAT_FREERTOS)
++if (ESP_PLATFORM OR LWS_WITH_ESP32 OR LWS_PLAT_BAREMETAL OR LWS_PLAT_FREERTOS OR LWS_PLAT_RTSMART)
+ option(LWS_WITH_MINIMAL_EXAMPLES "Also build the normally standalone minimal examples, for QA" OFF)
+ else()
+ option(LWS_WITH_MINIMAL_EXAMPLES "Also build the normally standalone minimal examples, for QA" ON)
+diff --git a/cmake/lws_config.h.in b/cmake/lws_config.h.in
+--- a/cmake/lws_config.h.in
++++ b/cmake/lws_config.h.in
+@@ -136,6 +136,7 @@
+ #cmakedefine LWS_OTA_PUBLIC_JWK "${LWS_OTA_PUBLIC_JWK}"
+ #cmakedefine LWS_OTA_VARIANT "${LWS_OTA_VARIANT}"
+ #cmakedefine LWS_PLAT_OPTEE
++#cmakedefine LWS_PLAT_RTSMART
+ #cmakedefine LWS_PLAT_UNIX
+ #cmakedefine LWS_PLAT_FREERTOS
+ #cmakedefine LWS_PLAT_BAREMETAL
+diff --git a/lib/CMakeLists.txt b/lib/CMakeLists.txt
+--- a/lib/CMakeLists.txt
++++ b/lib/CMakeLists.txt
+@@ -38,7 +38,9 @@ set(LWS_LIB_BUILD_INC_PATHS_TEMP "")
+ # Plat specific build items
+ #
+ 
+-if (LWS_PLAT_FREERTOS)
++if (LWS_PLAT_RTSMART)
++	add_subdir_include_dirs(plat/rtsmart)
++elseif (LWS_PLAT_FREERTOS)
+ 	add_subdir_include_dirs(plat/freertos)
+ 	if (ESP_PLATFORM)
+ 		list(APPEND LWS_ESP_IDF_DIRS
+@@ -107,15 +109,19 @@ endif()
+ 
+ # ideally we want to use pipe2()
+ 
++if (LWS_PLAT_RTSMART)
++	set(LWS_HAVE_PIPE2 0)
++else()
+ CHECK_C_SOURCE_COMPILES("
+ 	#ifndef _GNU_SOURCE
+ 	#define _GNU_SOURCE
+ 	#endif
+ 	#include <unistd.h>
+ 	int main(void) {
+ 		int fd[2];
+ 		return pipe2(fd, 0);
+ 	}" LWS_HAVE_PIPE2)
++endif()
+ 
+ # tcp keepalive needs this on linux to work practically... but it only exists
+ # after kernel 2.6.37
+@@ -487,6 +493,9 @@ if (DEFINED LWS_PLAT_UNIX)
+ 		add_definitions("-D__illumos__")
+ 	endif()
+ endif()
++if (DEFINED LWS_PLAT_RTSMART)
++	set(LWS_PLAT_RTSMART ${LWS_PLAT_RTSMART} PARENT_SCOPE)
++endif()
+ set(LWS_HAVE_MBEDTLS_NET_SOCKETS ${LWS_HAVE_MBEDTLS_NET_SOCKETS} PARENT_SCOPE)
+ set(LWS_HAVE_SSL_set_tlsext_host_name ${LWS_HAVE_SSL_set_tlsext_host_name} PARENT_SCOPE)
+ set(LWS_HAVE_MBEDTLS_SSL_NEW_SESSION_TICKET ${LWS_HAVE_MBEDTLS_SSL_NEW_SESSION_TICKET} PARENT_SCOPE)
+diff --git a/lib/core/private-lib-core.h b/lib/core/private-lib-core.h
+--- a/lib/core/private-lib-core.h
++++ b/lib/core/private-lib-core.h
+@@ -128,7 +128,9 @@ typedef uint8_t lws_mutex_refcount_t;
+   *
+   */
+ 
+- #if defined(LWS_PLAT_FREERTOS)
++ #if defined(LWS_PLAT_RTSMART)
++  #include "private-lib-plat-rtsmart.h"
++ #elif defined(LWS_PLAT_FREERTOS)
+   #include "private-lib-plat-freertos.h"
+  #else
+   #if defined(WIN32) || defined(_WIN32)

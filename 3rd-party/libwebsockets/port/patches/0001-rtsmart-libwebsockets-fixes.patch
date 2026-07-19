@@ -1,47 +1,15 @@
-diff --git a/lib/plat/unix/unix-misc.c b/lib/plat/unix/unix-misc.c
-index fce5e4297..4c1fb993a 100644
---- a/lib/plat/unix/unix-misc.c
-+++ b/lib/plat/unix/unix-misc.c
-@@ -65,10 +65,16 @@ lws_get_random(struct lws_context *context, void *buf, size_t len)
- #if defined(__COVERITY__)
- 	memset(buf, 0, len);
- 	return len;
-+#else
-+#if defined(LWS_PLAT_RTSMART) && defined(LWS_WITH_MBEDTLS) && \
-+	!defined(LWS_HAVE_MBEDTLS_V4)
-+	/* RT-Smart /dev/urandom may short-read; use lws' seeded mbedTLS DRBG. */
-+	return mbedtls_ctr_drbg_random(&context->mcdc, buf, len) == 0 ? len : 0;
- #else
- 	/* coverity[tainted_scalar] */
- 	return (size_t)read(context->fd_random, (char *)buf, len);
- #endif
-+#endif
- }
- 
- void lwsl_emit_syslog(int level, const char *line)
-diff --git a/lib/plat/unix/unix-service.c b/lib/plat/unix/unix-service.c
-index 666084005..cde811aaf 100644
---- a/lib/plat/unix/unix-service.c
-+++ b/lib/plat/unix/unix-service.c
-@@ -101,12 +101,18 @@ _lws_plat_service_tsi(struct lws_context *context, int timeout_ms, int tsi)
- 	pt = &context->pt[tsi];
- 	vpt = (volatile struct lws_context_per_thread *)pt;
- 
-+#if defined(LWS_PLAT_RTSMART)
-+	if (timeout_ms < 0)
-+		timeout_ms = 0;
-+	timeout_us = ((lws_usec_t)timeout_ms) * LWS_US_PER_MS;
-+#else
- 	if (timeout_ms < 0)
- 		timeout_ms = 0;
- 	else
- 		/* force a default timeout of 23 days */
- 		timeout_ms = LWS_POLL_WAIT_LIMIT;
- 	timeout_us = ((lws_usec_t)timeout_ms) * LWS_US_PER_MS;
-+#endif
- 
- 	if (context->event_loop_ops->run_pt)
- 		context->event_loop_ops->run_pt(context, tsi);
+From 1f2f8f6f7f5e0e7f0f4b3c08e6eaa5e62c0d1a12 Mon Sep 17 00:00:00 2001
+From: RT-Smart Port <port@libwebsockets.invalid>
+Date: Fri, 17 Jul 2026 15:00:00 +0800
+Subject: [PATCH] mbedtls: keep client ALPN storage alive
+
+Keep the temporary ALPN buffer in function scope so its contents remain
+valid for the complete TLS setup operation.
+
+---
+ lib/tls/mbedtls/mbedtls-client.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
 diff --git a/lib/tls/mbedtls/mbedtls-client.c b/lib/tls/mbedtls/mbedtls-client.c
 index e0c482cfb..31fcff495 100644
 --- a/lib/tls/mbedtls/mbedtls-client.c

@@ -20,8 +20,11 @@ STAGING      := $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/$(DIR)/staging
 UPSTREAM_SRC := $(BUILD_DIR)/src
 PATCH_DIR    := $(LOCAL_DIR)/port/patches
 PATCHES      := $(sort $(wildcard $(PATCH_DIR)/*.patch))
+OVERLAY_DIR  := $(LOCAL_DIR)/port/overlay
+OVERLAY_FILES := $(shell find $(OVERLAY_DIR) -type f 2>/dev/null)
 UPSTREAM_REV := $(shell git -C $(UPSTREAM) rev-parse HEAD 2>/dev/null)
 SOURCE_STAMP := $(BUILD_DIR)/.source-$(UPSTREAM_REV)-patched
+CMAKE_STAMP  := $(BUILD_DIR)/.cmake-configured
 
 # ---- mbedtls dependency (already built by SDK) ----
 MBEDTLS_BASE     := $(SDK_RTSMART_SRC_DIR)/libs/3rd-party/mbedtls
@@ -39,9 +42,10 @@ CMAKE_FLAGS := \
 	-DCMAKE_TOOLCHAIN_FILE=$(CMAKE_TOOLCHAIN) \
 	-DCMAKE_BUILD_TYPE=Release \
 	-DDISABLE_WERROR=ON \
+	-DLWS_PLAT_RTSMART=ON \
 	-DLWS_WITH_SHARED=OFF \
 	-DLWS_WITH_STATIC=ON \
-	-DCMAKE_C_FLAGS="-DMBEDTLS_USER_CONFIG_FILE='\"mbedtls_port_config.h\"' -I$(MBEDTLS_PORT_INC) -I$(MBEDTLS_PUFS_INC) -I$(LOCAL_DIR)/port -DLWS_PLAT_RTSMART -Wno-error" \
+	-DCMAKE_C_FLAGS="-DMBEDTLS_USER_CONFIG_FILE='\"mbedtls_port_config.h\"' -I$(MBEDTLS_PORT_INC) -I$(MBEDTLS_PUFS_INC) -I$(RTSMART_HAL_INC_INSTALL_PATH) -I$(LOCAL_DIR)/port -Wno-error" \
 	-DCMAKE_INSTALL_PREFIX=$(STAGING) \
 	-DLWS_WITH_MBEDTLS=ON \
 	-DLWS_MBEDTLS_INCLUDE_DIRS="$(MBEDTLS_INC);$(MBEDTLS_PORT_INC);$(MBEDTLS_PUFS_INC)" \
@@ -107,12 +111,13 @@ all: $(LIB)
 	@$(ECHO) [BUILD] libs 3rd-party $(DIR) done.
 
 # ---- prepare patched source + cmake configure ----
-$(SOURCE_STAMP): Makefile $(PATCHES) | $(BUILD_DIR)
+$(SOURCE_STAMP): Makefile $(PATCH_DIR) $(PATCHES) $(OVERLAY_DIR) $(OVERLAY_FILES) | $(BUILD_DIR)
 	@echo "[SOURCE] preparing patched $(DIR) source ..."
 	@if [ -z "$(UPSTREAM_REV)" ]; then echo "[ERROR] $(UPSTREAM) is not a git checkout"; exit 1; fi
 	@rm -rf $(UPSTREAM_SRC)
 	@$(MKDIR) -p $(UPSTREAM_SRC)
 	@git -C $(UPSTREAM) archive --format=tar $(UPSTREAM_REV) | tar -xf - -C $(UPSTREAM_SRC) || exit $$?
+	@if [ -d "$(OVERLAY_DIR)" ]; then cp -a "$(OVERLAY_DIR)/." "$(UPSTREAM_SRC)/"; fi
 	@set -e; \
 	if [ -n "$(PATCHES)" ]; then \
 		for p in $(PATCHES); do \
@@ -123,12 +128,15 @@ $(SOURCE_STAMP): Makefile $(PATCHES) | $(BUILD_DIR)
 	@rm -f $(BUILD_DIR)/.source-*-patched
 	@touch $@
 
-cmake-configure: $(SOURCE_STAMP) | $(BUILD_DIR)
+$(CMAKE_STAMP): $(SOURCE_STAMP) $(CMAKE_TOOLCHAIN) | $(BUILD_DIR)
 	@echo "[CMAKE] configuring $(DIR) ..."
 	@cd $(BUILD_DIR) && $(CMAKE) --fresh $(CMAKE_FLAGS) $(UPSTREAM_SRC) || exit $$?
+	@touch $@
+
+cmake-configure: $(CMAKE_STAMP)
 
 # ---- build via cmake ----
-$(BUILD_DIR)/lib/libwebsockets.a: cmake-configure
+$(BUILD_DIR)/lib/libwebsockets.a: $(CMAKE_STAMP)
 	@echo "[CMAKE] building $(DIR) ..."
 	@$(CMAKE) --build $(BUILD_DIR) --target websockets -- -j$$(nproc) || exit $$?
 
