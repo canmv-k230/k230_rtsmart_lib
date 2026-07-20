@@ -8,3 +8,4 @@ test_*.elf
 3rd-party/freetype/freetype/
 3rd-party/mbedtls/mbedtls/
 3rd-party/mqttclient/mqttclient/
+3rd-party/libpeer/3rd-party/lib

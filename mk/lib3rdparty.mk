@@ -5,6 +5,7 @@ lib3rd_party_inc_dir := \
 	$(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include/mbedtls \
 	$(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include/minihttp \
 	$(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include/libwebsockets \
+	$(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include/tuya \
 
 lib3rd_party_lib_dir := $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/lib
 
