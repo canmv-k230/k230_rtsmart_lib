@@ -2,13 +2,32 @@
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR riscv64)
 
-set(CROSS_COMPILE riscv64-unknown-linux-musl-)
+# The RT-Smart Make build passes an absolute prefix here.  This keeps CMake
+# independent of PATH, while retaining a useful standalone-CMake fallback.
+if(NOT DEFINED CROSS_COMPILE OR "${CROSS_COMPILE}" STREQUAL "")
+  if(DEFINED ENV{CROSS_COMPILE} AND NOT "$ENV{CROSS_COMPILE}" STREQUAL "")
+    set(CROSS_COMPILE "$ENV{CROSS_COMPILE}" CACHE STRING "Cross-toolchain executable prefix" FORCE)
+  else()
+    set(CROSS_COMPILE "riscv64-unknown-linux-musl-" CACHE STRING "Cross-toolchain executable prefix" FORCE)
+  endif()
+endif()
 
-set(CMAKE_C_COMPILER   ${CROSS_COMPILE}gcc)
-set(CMAKE_CXX_COMPILER ${CROSS_COMPILE}g++)
-set(CMAKE_AR           ${CROSS_COMPILE}ar)
-set(CMAKE_RANLIB       ${CROSS_COMPILE}ranlib)
-set(CMAKE_STRIP        ${CROSS_COMPILE}strip)
+# Do not override explicitly supplied CMake compiler paths.
+if(NOT DEFINED CMAKE_C_COMPILER)
+  set(CMAKE_C_COMPILER "${CROSS_COMPILE}gcc")
+endif()
+if(NOT DEFINED CMAKE_CXX_COMPILER)
+  set(CMAKE_CXX_COMPILER "${CROSS_COMPILE}g++")
+endif()
+if(NOT DEFINED CMAKE_AR)
+  set(CMAKE_AR "${CROSS_COMPILE}ar")
+endif()
+if(NOT DEFINED CMAKE_RANLIB)
+  set(CMAKE_RANLIB "${CROSS_COMPILE}ranlib")
+endif()
+if(NOT DEFINED CMAKE_STRIP)
+  set(CMAKE_STRIP "${CROSS_COMPILE}strip")
+endif()
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
