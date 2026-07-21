@@ -1,6 +1,5 @@
 include ../../mkenv.mk
 include $(SDK_RTSMART_SRC_DIR)/libs/mk/toolchain_riscv64_musl.mk
-include $(SDK_RTSMART_SRC_DIR)/libs/mk/lib3rdparty.mk
 
 SDK_DIR := $(shell pwd)
 BUILD := $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/tuya-iot-core-sdk
