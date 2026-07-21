@@ -100,28 +100,30 @@ int posix_fallocate64(int fd, off_t offset, off_t len)
     return posix_fallocate(fd, offset, len);
 }
 
-/*
-#define PMUTEX_INIT    0
 #define PMUTEX_LOCK    1
-#define PMUTEX_UNLOCK  2
 #define PMUTEX_DESTROY 3
-*/
+
+static int pmutex_result(long ret)
+{
+    return ret < 0 ? (int)-ret : (int)ret;
+}
 
 int pthread_mutex_lock(pthread_mutex_t *m)
 {
-    int retry = 0;
+    long ret;
 
-    while(0x00 != syscall(_NRSYS_pmutex, (long)m, 1, 0)) {
-        retry++;
-        if (retry > 100) {
-            retry = 0;
-            printf("pthread_mutex_lock: failed to lock mutex after %d tries\n", retry);
-        }
+    if (m == NULL)
+        return EINVAL;
 
-        usleep(1000); // sleep for 1ms before retrying to avoid busy-waiting
+    for (;;)
+    {
+        ret = syscall(_NRSYS_pmutex, (long)m, PMUTEX_LOCK, 0);
+        /* pthread mutex locking must not expose EINTR to its caller. */
+        if (pmutex_result(ret) != EINTR)
+            break;
     }
 
-    return 0; // success
+    return pmutex_result(ret);
 }
 
 int pthread_get_tid(void)
