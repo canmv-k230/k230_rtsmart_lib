@@ -221,6 +221,7 @@ NRSYS(rt_hw_interrupt_disable)
 NRSYS(rt_hw_interrupt_enable)
 
 NRSYS(statfs)
+NRSYS(sched_yield)              /* 165 */
 
     _NRSYS_SYSCALL_NR
 };

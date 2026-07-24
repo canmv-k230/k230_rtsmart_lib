@@ -29,6 +29,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <sched.h>
 
 #include "hal_syscall.h"
 
@@ -129,4 +130,9 @@ int pthread_mutex_lock(pthread_mutex_t *m)
 int pthread_get_tid(void)
 {
     return syscall(_NRSYS_gettid);
+}
+
+int sched_yield(void)
+{
+    return (int)syscall(_NRSYS_sched_yield);
 }
