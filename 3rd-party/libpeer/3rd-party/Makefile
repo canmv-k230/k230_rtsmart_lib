@@ -6,7 +6,7 @@ include $(SDK_RTSMART_SRC_DIR)/libs/mk/libmpp.mk
 
 LIB_DIR = $(shell pwd)/lib
 
-SUBDIRS := mbedtls libsrtp usrsctp
+SUBDIRS := libsrtp usrsctp
 
 .PHONY: all clean $(SUBDIRS)
 

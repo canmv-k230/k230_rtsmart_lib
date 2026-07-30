@@ -23,15 +23,28 @@ void utils_random_string(char* s, const int len) {
   s[len] = '\0';
 }
 
-void utils_get_hmac_sha1(const char* input, size_t input_len, const char* key, size_t key_len, unsigned char* output) {
+int utils_get_hmac_sha1(const char* input, size_t input_len, const char* key, size_t key_len, unsigned char* output) {
   mbedtls_md_context_t ctx;
-  mbedtls_md_type_t md_type = MBEDTLS_MD_SHA1;
+  const mbedtls_md_info_t* md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA1);
+  int ret;
+
+  if (!md_info) {
+    return -1;
+  }
+
   mbedtls_md_init(&ctx);
-  mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(md_type), 1);
-  mbedtls_md_hmac_starts(&ctx, (const unsigned char*)key, key_len);
-  mbedtls_md_hmac_update(&ctx, (const unsigned char*)input, input_len);
-  mbedtls_md_hmac_finish(&ctx, output);
+  ret = mbedtls_md_setup(&ctx, md_info, 1);
+  if (ret == 0) {
+    ret = mbedtls_md_hmac_starts(&ctx, (const unsigned char*)key, key_len);
+  }
+  if (ret == 0) {
+    ret = mbedtls_md_hmac_update(&ctx, (const unsigned char*)input, input_len);
+  }
+  if (ret == 0) {
+    ret = mbedtls_md_hmac_finish(&ctx, output);
+  }
   mbedtls_md_free(&ctx);
+  return ret;
 }
 
 void utils_get_md5(const char* input, size_t input_len, unsigned char* output) {

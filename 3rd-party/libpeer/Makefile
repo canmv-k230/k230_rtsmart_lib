@@ -21,9 +21,11 @@ CXXFLAGS := $(C_CXX_FLAGS) -std=c++20
 CFLAGS += -D_GNU_SOURCE
 CFLAGS += -DCONFIG_IPV6=0
 CFLAGS += -DCONFIG_USE_LWIP=0
+CFLAGS += -DCONFIG_USE_GETIFADDRS=0
 CFLAGS += -DCONFIG_USE_USRSCTP=1
 CFLAGS += -DHTTP_DO_NOT_USE_CUSTOM_CONFIG
 CFLAGS += -DMQTT_DO_NOT_USE_CUSTOM_CONFIG
+CFLAGS += -DMBEDTLS_USER_CONFIG_FILE=\"mbedtls_port_config.h\"
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -Wno-discarded-qualifiers
 
@@ -42,8 +44,8 @@ CFLAGS += -I3rd-party/coreMQTT/source/interface
 # SDK-installed 3rd-party includes
 CFLAGS += -I$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/cJSON
 
-# Private 3rd-party dependency includes (relative paths, self-contained)
-CFLAGS += -I3rd-party/mbedtls/include
+# Private 3rd-party dependency includes
+CFLAGS += -I$(RTSMART_3RD_PARTY_INC_INSTALL_PATH)/mbedtls
 CFLAGS += -I3rd-party/libsrtp/include
 CFLAGS += -I3rd-party/libsrtp/crypto/include
 CFLAGS += -I3rd-party/usrsctp/usrsctplib

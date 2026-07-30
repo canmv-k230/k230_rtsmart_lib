@@ -132,7 +132,7 @@ int udp_socket_sendto(UdpSocket* udp_socket, Address* addr, const uint8_t* buf, 
   return ret;
 }
 
-int udp_socket_recvfrom(UdpSocket* udp_socket, Address* addr, uint8_t* buf, int len) {
+static int udp_socket_recvfrom_flags(UdpSocket* udp_socket, Address* addr, uint8_t* buf, int len, int flags) {
   struct sockaddr_in6 sin6;
   struct sockaddr_in sin;
   struct sockaddr* sa;
@@ -158,7 +158,10 @@ int udp_socket_recvfrom(UdpSocket* udp_socket, Address* addr, uint8_t* buf, int 
       break;
   }
 
-  if ((ret = recvfrom(udp_socket->fd, buf, len, 0, sa, &sock_len)) < 0) {
+  if ((ret = recvfrom(udp_socket->fd, buf, len, flags, sa, &sock_len)) < 0) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      return 0;
+    }
     LOGE("Failed to recvfrom: %s", strerror(errno));
     return -1;
   }
@@ -180,6 +183,14 @@ int udp_socket_recvfrom(UdpSocket* udp_socket, Address* addr, uint8_t* buf, int 
   }
 
   return ret;
+}
+
+int udp_socket_recvfrom(UdpSocket* udp_socket, Address* addr, uint8_t* buf, int len) {
+  return udp_socket_recvfrom_flags(udp_socket, addr, buf, len, 0);
+}
+
+int udp_socket_recvfrom_nonblocking(UdpSocket* udp_socket, Address* addr, uint8_t* buf, int len) {
+  return udp_socket_recvfrom_flags(udp_socket, addr, buf, len, MSG_DONTWAIT);
 }
 
 int tcp_socket_open(TcpSocket* tcp_socket, int family) {

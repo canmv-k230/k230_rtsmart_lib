@@ -49,6 +49,7 @@ struct IceCandidatePair {
   IceCandidate* local;
   IceCandidate* remote;
   int conncheck;
+  uint32_t conncheck_timestamp;
   uint64_t priority;
 };
 

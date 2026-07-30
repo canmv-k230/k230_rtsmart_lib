@@ -53,9 +53,8 @@ int ports_get_host_addr(Address* addr, const char* iface_prefix) {
     }
   }
 #else
-  /* If iface_prefix is specified, use ioctl as before (for K230 etc.).
-   * Otherwise, use getifaddrs to enumerate all interfaces and pick
-   * the first UP non-loopback IPv4 address — works on any Linux. */
+  /* If iface_prefix is specified, use ioctl directly. Otherwise, prefer
+   * getifaddrs where supported, then try known interface names via ioctl. */
   if (iface_prefix && strlen(iface_prefix) > 0) {
     int sock;
     struct ifreq ifr;
@@ -83,6 +82,8 @@ int ports_get_host_addr(Address* addr, const char* iface_prefix) {
     close(sock);
   } else {
     static const char* ifnames[] = {"u0", "e0", "eth0", "en0", "w0", "wlan0", NULL};
+
+#if CONFIG_USE_GETIFADDRS
     struct ifaddrs* ifaddr;
     struct ifaddrs* ifa;
 
@@ -107,6 +108,7 @@ int ports_get_host_addr(Address* addr, const char* iface_prefix) {
         return ret;
       }
     }
+#endif
 
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {

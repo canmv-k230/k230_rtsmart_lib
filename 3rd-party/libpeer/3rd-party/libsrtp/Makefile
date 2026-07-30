@@ -19,19 +19,21 @@ CFLAGS += -D_GNU_SOURCE
 CFLAGS += -I.
 CFLAGS += -Iinclude
 CFLAGS += -Icrypto/include
-CFLAGS += -I$(LOCAL_DIR)/../mbedtls/include
 
+# libpeer negotiates AES-CM/HMAC-SHA1. Keep SRTP self-tests independent of
+# the SDK Mbed TLS hardware AES/GCM alternatives.
 CFILES := \
 	srtp/srtp.c \
 	crypto/cipher/cipher.c \
 	crypto/cipher/cipher_test_cases.c \
 	crypto/cipher/null_cipher.c \
-	crypto/cipher/aes_icm_mbedtls.c \
-	crypto/cipher/aes_gcm_mbedtls.c \
+	crypto/cipher/aes.c \
+	crypto/cipher/aes_icm.c \
 	crypto/hash/auth.c \
 	crypto/hash/auth_test_cases.c \
 	crypto/hash/null_auth.c \
-	crypto/hash/hmac_mbedtls.c \
+	crypto/hash/hmac.c \
+	crypto/hash/sha1.c \
 	crypto/kernel/alloc.c \
 	crypto/kernel/crypto_kernel.c \
 	crypto/kernel/err.c \

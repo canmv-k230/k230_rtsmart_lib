@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/select.h>
 #include <unistd.h>
 
 #include "agent.h"
@@ -12,9 +11,8 @@
 #include "stun.h"
 #include "utils.h"
 
-#define AGENT_POLL_TIMEOUT 1
-#define AGENT_CONNCHECK_MAX 50
-#define AGENT_CONNCHECK_PERIOD 5
+#define AGENT_CONNCHECK_MAX 100
+#define AGENT_CONNCHECK_INTERVAL_MS 50
 #define AGENT_STUN_RECV_MAXTIMES 1000
 
 static int agent_is_private_ipv4(Address* addr) {
@@ -113,46 +111,25 @@ void agent_destroy(Agent* agent) {
 }
 
 static int agent_socket_recv(Agent* agent, Address* addr, uint8_t* buf, int len) {
-  int ret = -1;
-  int i = 0;
-  int maxfd = -1;
-  fd_set rfds;
-  struct timeval tv;
+  int ret;
+  int i;
   int addr_type[] = { AF_INET,
 #if CONFIG_IPV6
                       AF_INET6,
 #endif
   };
 
-  tv.tv_sec = 0;
-  tv.tv_usec = AGENT_POLL_TIMEOUT * 1000;
-  FD_ZERO(&rfds);
-
   for (i = 0; i < sizeof(addr_type) / sizeof(addr_type[0]); i++) {
-    if (agent->udp_sockets[i].fd > maxfd) {
-      maxfd = agent->udp_sockets[i].fd;
+    if (agent->udp_sockets[i].fd < 0) {
+      continue;
     }
-    if (agent->udp_sockets[i].fd >= 0) {
-      FD_SET(agent->udp_sockets[i].fd, &rfds);
-    }
-  }
-
-  ret = select(maxfd + 1, &rfds, NULL, NULL, &tv);
-  if (ret < 0) {
-    LOGE("select error");
-  } else if (ret == 0) {
-    // timeout
-  } else {
-    for (i = 0; i < 2; i++) {
-      if (FD_ISSET(agent->udp_sockets[i].fd, &rfds)) {
-        memset(buf, 0, len);
-        ret = udp_socket_recvfrom(&agent->udp_sockets[i], addr, buf, len);
-        break;
-      }
+    ret = udp_socket_recvfrom_nonblocking(&agent->udp_sockets[i], addr, buf, len);
+    if (ret != 0) {
+      return ret;
     }
   }
 
-  return ret;
+  return 0;
 }
 
 static int agent_socket_recv_attempts(Agent* agent, Address* addr, uint8_t* buf, int len, int maxtimes) {
@@ -162,6 +139,7 @@ static int agent_socket_recv_attempts(Agent* agent, Address* addr, uint8_t* buf,
     if ((ret = agent_socket_recv(agent, addr, buf, len)) != 0) {
       break;
     }
+    ports_sleep_ms(1);
   }
   return ret;
 }
@@ -938,8 +916,8 @@ static void agent_create_binding_request(Agent* agent, StunMessage* msg) {
     stun_msg_write_attr(msg, STUN_ATTR_TYPE_ICE_CONTROLLED, 8, (char*)&tie_breaker);
   }
   stun_msg_finish(msg, STUN_CREDENTIAL_SHORT_TERM, agent->remote_upwd, strlen(agent->remote_upwd));
-  LOGI("Binding request: username=%s, pwd=%s, priority=%u, size=%zu",
-       username, agent->remote_upwd, agent->nominated_pair->local->priority, msg->size);
+  LOGD("Binding request: username=%s, priority=%u, size=%zu",
+       username, agent->nominated_pair->local->priority, msg->size);
 }
 
 void agent_process_stun_request(Agent* agent, StunMessage* stun_msg, Address* addr) {
@@ -982,19 +960,27 @@ void agent_process_stun_response(Agent* agent, StunMessage* stun_msg, Address* s
             if (!agent->nominated_pair ||
                 agent->nominated_pair->state != ICE_CANDIDATE_STATE_SUCCEEDED) {
               agent->nominated_pair = agent->active_pairs[i];
-            } else {
+            } else if (agent->nominated_pair != agent->active_pairs[i]) {
+              char src_addr_str[ADDRSTRLEN] = {0};
+              addr_to_string(src_addr, src_addr_str, sizeof(src_addr_str));
               LOGI("Nominated pair already established, keeping current (late response from %s:%d ignored for nomination)",
-                   src_addr);
+                   src_addr_str, src_addr->port);
             }
             break;
           }
         }
         if (i == agent->active_pairs_count && agent->nominated_pair) {
-          LOGW("STUN response from unmatched address, marking nominated pair");
-          agent->nominated_pair->state = ICE_CANDIDATE_STATE_SUCCEEDED;
+          if (addr_equal(&agent->nominated_pair->remote->addr, src_addr)) {
+            LOGD("Ignoring duplicate STUN response for nominated pair");
+          } else {
+            char src_addr_str[ADDRSTRLEN] = {0};
+            addr_to_string(src_addr, src_addr_str, sizeof(src_addr_str));
+            LOGW("Ignoring STUN response from unmatched address %s:%d",
+                 src_addr_str, src_addr->port);
+          }
         }
       } else {
-        LOGI("STUN Binding Response validation failed (upwd=%s)", agent->remote_upwd);
+        LOGI("STUN Binding Response validation failed");
       }
       break;
     default:
@@ -1075,7 +1061,7 @@ void agent_set_remote_description(Agent* agent, char* description) {
   */
   int i;
 
-  LOGI("Set remote description:\n%s", description);
+  LOGD("Set remote description:\n%s", description);
 
   char* line_start = description;
   char* line_end = NULL;
@@ -1126,6 +1112,8 @@ void agent_update_candidate_pairs(Agent* agent) {
       agent->candidate_pairs[agent->candidate_pairs_num].remote = &agent->remote_candidates[j];
       agent->candidate_pairs[agent->candidate_pairs_num].priority = agent->local_candidates[i].priority + agent->remote_candidates[j].priority;
       agent->candidate_pairs[agent->candidate_pairs_num].state = ICE_CANDIDATE_STATE_FROZEN;
+      agent->candidate_pairs[agent->candidate_pairs_num].conncheck = 0;
+      agent->candidate_pairs[agent->candidate_pairs_num].conncheck_timestamp = 0;
       agent->candidate_pairs_num++;
     }
   }
@@ -1148,6 +1136,7 @@ void agent_update_candidate_pairs(Agent* agent) {
 int agent_connectivity_check(Agent* agent) {
   uint8_t buf[1400];
   StunMessage msg;
+  uint32_t now = ports_get_epoch_time();
   int i;
   int any_active = 0;
 
@@ -1165,8 +1154,17 @@ int agent_connectivity_check(Agent* agent) {
       }
     }
 
-    if (pair->conncheck % AGENT_CONNCHECK_PERIOD == 0) {
+    if (pair->conncheck >= AGENT_CONNCHECK_MAX &&
+        (uint32_t)(now - pair->conncheck_timestamp) >= AGENT_CONNCHECK_INTERVAL_MS) {
+      pair->state = ICE_CANDIDATE_STATE_FAILED;
+      continue;
+    }
+
+    if (pair->conncheck == 0 ||
+        (uint32_t)(now - pair->conncheck_timestamp) >= AGENT_CONNCHECK_INTERVAL_MS) {
       agent->nominated_pair = pair;
+      pair->conncheck++;
+      pair->conncheck_timestamp = now;
       memset(&msg, 0, sizeof(msg));
 
       if (pair->local->type == ICE_CANDIDATE_TYPE_RELAY && !agent->turn_relay_ready) {
@@ -1229,15 +1227,6 @@ int agent_select_candidate_pair(Agent* agent) {
     }
   }
 
-  for (i = 0; i < agent->active_pairs_count; i++) {
-    if (agent->active_pairs[i]->state == ICE_CANDIDATE_STATE_INPROGRESS) {
-      agent->active_pairs[i]->conncheck++;
-      if (agent->active_pairs[i]->conncheck >= AGENT_CONNCHECK_MAX) {
-        agent->active_pairs[i]->state = ICE_CANDIDATE_STATE_FAILED;
-      }
-    }
-  }
-
   for (i = agent->active_pairs_count - 1; i >= 0; i--) {
     if (agent->active_pairs[i]->state == ICE_CANDIDATE_STATE_FAILED) {
       for (j = i; j < agent->active_pairs_count - 1; j++) {
@@ -1250,6 +1239,7 @@ int agent_select_candidate_pair(Agent* agent) {
   for (i = 0; i < agent->candidate_pairs_num && agent->active_pairs_count < AGENT_MAX_ACTIVE_PAIRS; i++) {
     if (agent->candidate_pairs[i].state == ICE_CANDIDATE_STATE_FROZEN) {
       agent->candidate_pairs[i].conncheck = 0;
+      agent->candidate_pairs[i].conncheck_timestamp = 0;
       agent->candidate_pairs[i].state = ICE_CANDIDATE_STATE_INPROGRESS;
       agent->active_pairs[agent->active_pairs_count++] = &agent->candidate_pairs[i];
     }

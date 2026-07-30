@@ -320,7 +320,11 @@ int stun_msg_finish(StunMessage* msg, StunCredential credential, const char* pas
   stun_attr->length = htons(20);
   memset(stun_attr->value, 0, 20);
 
-  utils_get_hmac_sha1((char*)msg->buf, msg->size, password, password_len, (unsigned char*)stun_attr->value);
+  if (utils_get_hmac_sha1((char*)msg->buf, msg->size, password, password_len,
+                          (unsigned char*)stun_attr->value) != 0) {
+    LOGE("Failed to calculate MESSAGE-INTEGRITY");
+    return -1;
+  }
   msg->size += sizeof(StunAttribute) + 20;
 
   stun_attr = (StunAttribute*)(msg->buf + msg->size);
@@ -396,40 +400,102 @@ StunMsgType stun_is_stun_msg(uint8_t *buf, size_t size) {
 }
 #endif
 int stun_msg_is_valid(uint8_t* buf, size_t size, char* password, StunCredential credential) {
+  StunHeader* header;
+  size_t message_size;
+  size_t pos;
+  size_t mi_offset = SIZE_MAX;
+  size_t fingerprint_offset = SIZE_MAX;
+  unsigned char received_integrity[20];
+  uint32_t received_fingerprint = 0;
+  uint32_t calculated_fingerprint = 0;
+  unsigned char calculated_integrity[20];
   StunMessage msg;
 
-  memcpy(msg.buf, buf, size);
+  (void)credential;
 
-  stun_parse_msg_buf(&msg);
-
-  StunHeader* header = (StunHeader*)msg.buf;
-
-  /* FINGERPRINT: computed over message excluding the FP attribute */
-  uint32_t fingerprint = 0;
-  size_t fp_length = size - 4 - sizeof(StunAttribute);
-  stun_calculate_fingerprint((char*)msg.buf, fp_length, &fingerprint);
-
-  if (fingerprint != msg.fingerprint) {
-    LOGE("FINGERPRINT mismatch: expected 0x%08x, got 0x%08x", fingerprint, msg.fingerprint);
+  if (!buf || !password || size < sizeof(StunHeader) || size > sizeof(msg.buf) ||
+      stun_probe(buf, size) != 0) {
     return -1;
   }
 
-  /* MESSAGE-INTEGRITY: adjust header length to exclude FINGERPRINT */
-  header->length = htons(ntohs(header->length) - 4 - sizeof(StunAttribute));
+  header = (StunHeader*)buf;
+  message_size = sizeof(StunHeader) + ntohs(header->length);
+  if (message_size != size) {
+    LOGE("Invalid STUN message length: header=%zu, received=%zu", message_size, size);
+    return -1;
+  }
 
-  unsigned char message_integrity[20];
+  pos = sizeof(StunHeader);
+  while (pos < message_size) {
+    StunAttribute* attr;
+    uint16_t attr_type;
+    size_t attr_len;
+    size_t padded_len;
+    size_t next;
 
-  size_t mi_length = size - 4 - sizeof(StunAttribute) - 20 - sizeof(StunAttribute);
-  utils_get_hmac_sha1((char*)msg.buf, mi_length, password, strlen(password), message_integrity);
-
-  if (memcmp(message_integrity, msg.message_integrity, 20) != 0) {
-    char expected_hex[41];
-    char actual_hex[41];
-    for (int i = 0; i < 20; i++) {
-      sprintf(expected_hex + 2 * i, "%02x", (uint8_t)message_integrity[i]);
-      sprintf(actual_hex + 2 * i, "%02x", (uint8_t)msg.message_integrity[i]);
+    if (message_size - pos < sizeof(StunAttribute)) {
+      LOGE("Truncated STUN attribute header");
+      return -1;
     }
-    LOGE("MI mismatch: expected %s, got %s (pwd=%s)", expected_hex, actual_hex, password);
+
+    attr = (StunAttribute*)(buf + pos);
+    attr_type = ntohs(attr->type);
+    attr_len = ntohs(attr->length);
+    padded_len = (attr_len + 3U) & ~3U;
+    next = pos + sizeof(StunAttribute) + padded_len;
+    if (next > message_size) {
+      LOGE("Truncated STUN attribute 0x%04x", attr_type);
+      return -1;
+    }
+
+    if (attr_type == STUN_ATTR_TYPE_MESSAGE_INTEGRITY) {
+      if (attr_len != sizeof(received_integrity) || mi_offset != SIZE_MAX) {
+        LOGE("Invalid MESSAGE-INTEGRITY attribute");
+        return -1;
+      }
+      mi_offset = pos;
+      memcpy(received_integrity, attr->value, sizeof(received_integrity));
+    } else if (attr_type == STUN_ATTR_TYPE_FINGERPRINT) {
+      if (attr_len != sizeof(received_fingerprint) || fingerprint_offset != SIZE_MAX ||
+          next != message_size) {
+        LOGE("Invalid FINGERPRINT attribute");
+        return -1;
+      }
+      fingerprint_offset = pos;
+      memcpy(&received_fingerprint, attr->value, sizeof(received_fingerprint));
+    }
+
+    pos = next;
+  }
+
+  if (mi_offset == SIZE_MAX) {
+    LOGE("STUN message has no MESSAGE-INTEGRITY attribute");
+    return -1;
+  }
+
+  memcpy(msg.buf, buf, size);
+  header = (StunHeader*)msg.buf;
+
+  if (fingerprint_offset != SIZE_MAX) {
+    stun_calculate_fingerprint((char*)msg.buf, fingerprint_offset, &calculated_fingerprint);
+    if (calculated_fingerprint != received_fingerprint) {
+      LOGE("FINGERPRINT mismatch");
+      return -1;
+    }
+  }
+
+  /* The HMAC length ends before MESSAGE-INTEGRITY, while the STUN header
+   * length includes the MESSAGE-INTEGRITY attribute itself. */
+  header->length = htons((uint16_t)(mi_offset + sizeof(StunAttribute) +
+                                    sizeof(received_integrity) - sizeof(StunHeader)));
+  if (utils_get_hmac_sha1((char*)msg.buf, mi_offset, password, strlen(password),
+                          calculated_integrity) != 0) {
+    LOGE("Failed to calculate MESSAGE-INTEGRITY");
+    return -1;
+  }
+
+  if (memcmp(calculated_integrity, received_integrity, sizeof(received_integrity)) != 0) {
+    LOGE("MESSAGE-INTEGRITY mismatch (size=%zu, offset=%zu)", size, mi_offset);
     return -1;
   }
 

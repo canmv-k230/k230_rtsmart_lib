@@ -6,9 +6,6 @@
 
 /* #define ENABLE_DEBUG_LOGGING 1 */
 
-#define MBEDTLS 1
-#define GCM 1
-
 #define CPU_CISC 1
 /* #undef CPU_RISC */
 /* #undef HAVE_X86 */

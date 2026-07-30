@@ -21,6 +21,8 @@ CFLAGS += -DSCTP_DEBUG
 CFLAGS += -DINET
 CFLAGS += -D_GNU_SOURCE
 CFLAGS += -DHAVE_STDATOMIC_H
+CFLAGS += -Dm_free=usrsctp_m_free
+CFLAGS += -DSCTP_USE_IFADDRS=0
 CFLAGS += -Wno-address-of-packed-member
 CFLAGS += -Wno-deprecated-declarations
 CFLAGS += -Wno-unused-function

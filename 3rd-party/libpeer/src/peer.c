@@ -8,8 +8,9 @@
 #include "utils.h"
 
 int peer_init() {
-  if (srtp_init() != srtp_err_status_ok) {
-    LOGE("libsrtp init failed");
+  srtp_err_status_t status = srtp_init();
+  if (status != srtp_err_status_ok) {
+    LOGE("libsrtp init failed: %d", status);
     return -1;
   }
   sctp_usrsctp_init();

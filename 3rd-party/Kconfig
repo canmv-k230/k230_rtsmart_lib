@@ -83,6 +83,7 @@ menu "RT-Smart 3rd-party Configuration"
         bool "Enable Build libpeer (WebRTC)"
         default n
         select RTSMART_3RD_PARTY_ENABLE_CJSON
+        select RTSMART_3RD_PARTY_ENABLE_MBEDTLS
 
         if RTSMART_3RD_PARTY_ENABLE_LIBPEER
 

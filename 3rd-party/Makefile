@@ -23,6 +23,8 @@ ifneq ($(strip $(subdirs-y)),)
 $(subdirs-y):
 	@echo "[BUILD] rtsmart libs 3rd-party $@"
 	@$(MAKE) -C $@ all || exit $?;
+
+libpeer: mbedtls cjson
 endif
 
 clean:

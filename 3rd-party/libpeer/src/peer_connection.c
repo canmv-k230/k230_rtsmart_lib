@@ -73,7 +73,6 @@ static int dtls_is_fragmented(const uint8_t* data, size_t len,
 }
 
 static int peer_connection_dtls_srtp_recv(void* ctx, unsigned char* buf, size_t len) {
-  int recv_max = 0;
   int ret = -1;
   DtlsSrtp* dtls_srtp = (DtlsSrtp*)ctx;
   PeerConnection* pc = (PeerConnection*)dtls_srtp->user_data;
@@ -97,12 +96,14 @@ static int peer_connection_dtls_srtp_recv(void* ctx, unsigned char* buf, size_t 
     ret = pc->agent_ret;
     pc->agent_ret = 0;
   } else {
-    while (recv_max < CONFIG_TLS_READ_TIMEOUT && pc->state == PEER_CONNECTION_CONNECTED) {
-      ret = agent_recv(&pc->agent, buf, len);
-      if (ret > 0) break;
-      recv_max++;
+    ret = agent_recv(&pc->agent, buf, len);
+    if (ret == 0) {
+      /* agent_recv() is nonblocking on RT-Smart. Zero means that no DTLS
+       * datagram is ready (or that a STUN datagram was consumed), not EOF. */
+      ports_sleep_ms(1);
+      return MBEDTLS_ERR_SSL_WANT_READ;
     }
-    if (ret <= 0) return ret;
+    if (ret < 0) return ret;
   }
 
   uint32_t hs_total_len, frag_off, frag_len;
@@ -135,7 +136,7 @@ static int peer_connection_dtls_srtp_recv(void* ctx, unsigned char* buf, size_t 
   uint32_t received = frag_len;
 
   uint8_t tmp[2048];
-  recv_max = 0;
+  int recv_max = 0;
   while (received < hs_total_len && recv_max < CONFIG_TLS_READ_TIMEOUT) {
     int r = agent_recv(&pc->agent, tmp, sizeof(tmp));
     if (r > 0) {
@@ -434,8 +435,9 @@ int peer_connection_loop(PeerConnection* pc) {
       break;
 
     case PEER_CONNECTION_CONNECTED:
-
-      if (dtls_srtp_handshake(&pc->dtls_srtp, NULL) == 0) {
+    {
+      int handshake_ret = dtls_srtp_handshake(&pc->dtls_srtp, NULL);
+      if (handshake_ret == 0) {
         LOGD("DTLS-SRTP handshake done");
 
         if (pc->config.datachannel) {
@@ -445,8 +447,12 @@ int peer_connection_loop(PeerConnection* pc) {
         }
 
         STATE_CHANGED(pc, PEER_CONNECTION_COMPLETED);
+      } else if (handshake_ret != MBEDTLS_ERR_SSL_WANT_READ &&
+                 handshake_ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+        STATE_CHANGED(pc, PEER_CONNECTION_FAILED);
       }
       break;
+    }
     case PEER_CONNECTION_COMPLETED:
       if ((pc->agent_ret = agent_recv(&pc->agent, pc->agent_buf, sizeof(pc->agent_buf))) > 0) {
         LOGD("agent_recv %d", pc->agent_ret);
@@ -506,6 +512,7 @@ int peer_connection_loop(PeerConnection* pc) {
 }
 
 void peer_connection_set_remote_description(PeerConnection* pc, const char* sdp, SdpType type) {
+  static const char fingerprint_prefix[] = "a=fingerprint:sha-256 ";
   char* start = (char*)sdp;
   char* line = NULL;
   char buf[256];
@@ -524,8 +531,12 @@ void peer_connection_set_remote_description(PeerConnection* pc, const char* sdp,
       role = DTLS_SRTP_ROLE_CLIENT;
     }
 
-    if (strstr(buf, "a=fingerprint")) {
-      strncpy(pc->dtls_srtp.remote_fingerprint, buf + 22, DTLS_SRTP_FINGERPRINT_LENGTH);
+    if (strncmp(buf, fingerprint_prefix, sizeof(fingerprint_prefix) - 1) == 0) {
+      snprintf(pc->dtls_srtp.remote_fingerprint,
+               sizeof(pc->dtls_srtp.remote_fingerprint),
+               "%s",
+               buf + sizeof(fingerprint_prefix) - 1);
+      LOGD("remote fingerprint: %s", pc->dtls_srtp.remote_fingerprint);
     }
 
     if (strstr(buf, "a=ice-ufrag") &&

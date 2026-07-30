@@ -1,14 +1,15 @@
 #ifndef CONFIG_H_
 #define CONFIG_H_
 
-// uncomment this if you want to handshake with a aiortc
-// #define CONFIG_DTLS_USE_ECDSA 1
-
 #define SCTP_MTU (1200)
 #define CONFIG_MTU (1300)
 
 #ifndef CONFIG_USE_LWIP
 #define CONFIG_USE_LWIP 0
+#endif
+
+#ifndef CONFIG_USE_GETIFADDRS
+#define CONFIG_USE_GETIFADDRS 1
 #endif
 
 #ifndef CONFIG_MBEDTLS_DEBUG
@@ -26,7 +27,7 @@
 #endif
 
 #ifndef CONFIG_DTLS_USE_ECDSA
-#define CONFIG_DTLS_USE_ECDSA 0
+#define CONFIG_DTLS_USE_ECDSA 1
 #endif
 
 #ifndef CONFIG_USE_USRSCTP

@@ -125,6 +125,9 @@ static int rtp_encoder_encode_h264_fu_a(RtpEncoder* rtp_encoder, uint8_t* buf, s
 }
 
 static uint8_t* h264_find_nalu(uint8_t* buf_start, uint8_t* buf_end) {
+  if (buf_end - buf_start < 3)
+    return buf_end;
+
   uint8_t* p = buf_start + 2;
 
   while (p < buf_end) {
@@ -148,8 +151,11 @@ static int rtp_encoder_encode_h264(RtpEncoder* rtp_encoder, uint8_t* buf, size_t
     if (pend != buf_end)
       nalu_size--;
 
-    while (pstart[nalu_size - 1] == 0x00)
+    while (nalu_size > 0 && pstart[nalu_size - 1] == 0x00)
       nalu_size--;
+
+    if (nalu_size == 0)
+      continue;
 
     if (nalu_size <= RTP_PAYLOAD_SIZE) {
       rtp_encoder_encode_h264_single(rtp_encoder, pstart, nalu_size);
@@ -249,8 +255,11 @@ static int rtp_encoder_encode_h265(RtpEncoder* rtp_encoder, uint8_t* buf, size_t
     if (pend != buf_end)
       nalu_size--;
 
-    while (pstart[nalu_size - 1] == 0x00)
+    while (nalu_size > 0 && pstart[nalu_size - 1] == 0x00)
       nalu_size--;
+
+    if (nalu_size < 2)
+      continue;
 
     if (nalu_size <= RTP_PAYLOAD_SIZE) {
       rtp_encoder_encode_h265_single(rtp_encoder, pstart, nalu_size);
@@ -324,6 +333,9 @@ void rtp_encoder_init(RtpEncoder* rtp_encoder, MediaCodec codec, RtpOnPacket on_
 }
 
 int rtp_encoder_encode(RtpEncoder* rtp_encoder, const uint8_t* buf, size_t size, uint64_t timestamp_us) {
+  if (rtp_encoder == NULL || rtp_encoder->encode_func == NULL || buf == NULL || size == 0)
+    return -1;
+
   if (rtp_encoder->base_timestamp_us == 0)
     rtp_encoder->base_timestamp_us = timestamp_us;
   uint64_t delta_us = timestamp_us - rtp_encoder->base_timestamp_us;

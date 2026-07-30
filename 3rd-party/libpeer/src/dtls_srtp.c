@@ -398,8 +398,6 @@ static void dtls_srtp_key_derivation_cb(void* context,
 }
 
 static int dtls_srtp_do_handshake(DtlsSrtp* dtls_srtp) {
-  int ret;
-
   static mbedtls_timing_delay_context timer;
 
   mbedtls_ssl_set_timer_cb(&dtls_srtp->ssl, &timer, mbedtls_timing_set_delay, mbedtls_timing_get_delay);
@@ -412,40 +410,34 @@ static int dtls_srtp_do_handshake(DtlsSrtp* dtls_srtp) {
 
   mbedtls_ssl_set_bio(&dtls_srtp->ssl, dtls_srtp, dtls_srtp->udp_send, dtls_srtp->udp_recv, NULL);
 
-  do {
-    ret = mbedtls_ssl_handshake(&dtls_srtp->ssl);
-
-  } while (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE);
-
-  return ret;
+  return mbedtls_ssl_handshake(&dtls_srtp->ssl);
 }
 
 static int dtls_srtp_handshake_server(DtlsSrtp* dtls_srtp) {
   int ret;
+  unsigned char client_ip[] = "test";
 
-  while (1) {
-    unsigned char client_ip[] = "test";
-
+  if (dtls_srtp->state == DTLS_SRTP_STATE_INIT) {
     mbedtls_ssl_session_reset(&dtls_srtp->ssl);
-
     mbedtls_ssl_set_client_transport_id(&dtls_srtp->ssl, client_ip, sizeof(client_ip));
-
-    ret = dtls_srtp_do_handshake(dtls_srtp);
-
-    if (ret == MBEDTLS_ERR_SSL_HELLO_VERIFY_REQUIRED) {
-      LOGD("DTLS hello verification requested");
-
-    } else if (ret != 0) {
-      LOGE("failed! mbedtls_ssl_handshake returned -0x%.4x", (unsigned int)-ret);
-
-      break;
-
-    } else {
-      break;
-    }
+    dtls_srtp->state = DTLS_SRTP_STATE_HANDSHAKE;
   }
 
-  LOGD("DTLS server handshake done");
+  ret = dtls_srtp_do_handshake(dtls_srtp);
+  if (ret == MBEDTLS_ERR_SSL_HELLO_VERIFY_REQUIRED) {
+    LOGD("DTLS hello verification requested");
+    mbedtls_ssl_session_reset(&dtls_srtp->ssl);
+    mbedtls_ssl_set_client_transport_id(&dtls_srtp->ssl, client_ip, sizeof(client_ip));
+    dtls_srtp->state = DTLS_SRTP_STATE_HANDSHAKE;
+    return MBEDTLS_ERR_SSL_WANT_READ;
+  }
+  if (ret != 0 && ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+    LOGE("failed! mbedtls_ssl_handshake returned -0x%.4x", (unsigned int)-ret);
+  }
+
+  if (ret == 0) {
+    LOGD("DTLS server handshake done");
+  }
 
   return ret;
 }
@@ -453,12 +445,17 @@ static int dtls_srtp_handshake_server(DtlsSrtp* dtls_srtp) {
 static int dtls_srtp_handshake_client(DtlsSrtp* dtls_srtp) {
   int ret;
 
+  if (dtls_srtp->state == DTLS_SRTP_STATE_INIT) {
+    dtls_srtp->state = DTLS_SRTP_STATE_HANDSHAKE;
+  }
   ret = dtls_srtp_do_handshake(dtls_srtp);
-  if (ret != 0) {
+  if (ret != 0 && ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
     LOGE("failed! mbedtls_ssl_handshake returned -0x%.4x\n\n", (unsigned int)-ret);
   }
 
-  LOGD("DTLS client handshake done");
+  if (ret == 0) {
+    LOGD("DTLS client handshake done");
+  }
 
   return ret;
 }
@@ -473,6 +470,10 @@ int dtls_srtp_handshake(DtlsSrtp* dtls_srtp, Address* addr) {
     ret = dtls_srtp_handshake_client(dtls_srtp);
   }
 
+  if (ret != 0) {
+    return ret;
+  }
+
   const mbedtls_x509_crt* remote_crt;
   if ((remote_crt = mbedtls_ssl_get_peer_cert(&dtls_srtp->ssl)) != NULL) {
     dtls_srtp_x509_digest(remote_crt, dtls_srtp->actual_remote_fingerprint);
@@ -485,7 +486,7 @@ int dtls_srtp_handshake(DtlsSrtp* dtls_srtp, Address* addr) {
     }
 
   } else {
-    LOGE("no remote fingerprint");
+    LOGE("DTLS handshake completed without a peer certificate");
     return -1;
   }
 
@@ -513,26 +514,12 @@ void dtls_srtp_reset_session(DtlsSrtp* dtls_srtp) {
 }
 
 int dtls_srtp_write(DtlsSrtp* dtls_srtp, const unsigned char* buf, size_t len) {
-  int ret;
-
-  do {
-    ret = mbedtls_ssl_write(&dtls_srtp->ssl, buf, len);
-
-  } while (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE);
-  return ret;
+  return mbedtls_ssl_write(&dtls_srtp->ssl, buf, len);
 }
 
 int dtls_srtp_read(DtlsSrtp* dtls_srtp, unsigned char* buf, size_t len) {
-  int ret;
-
   memset(buf, 0, len);
-
-  do {
-    ret = mbedtls_ssl_read(&dtls_srtp->ssl, buf, len);
-
-  } while (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE);
-
-  return ret;
+  return mbedtls_ssl_read(&dtls_srtp->ssl, buf, len);
 }
 
 int dtls_srtp_probe(uint8_t* buf) {
