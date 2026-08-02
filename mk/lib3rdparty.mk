@@ -6,8 +6,19 @@ lib3rd_party_inc_dir := \
 	$(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include/minihttp \
 	$(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include/libwebsockets \
 
+ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_NIMBLE),y)
+lib3rd_party_inc_dir += $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include/nimble
+endif
+
 lib3rd_party_lib_dir := $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/lib
 lib3rd_party_libs := $(filter-out $(lib3rd_party_lib_dir)/libtuya_iot_core.a,$(wildcard $(lib3rd_party_lib_dir)/*))
+
+RTSMART_LINK_NIMBLE ?= $(CONFIG_RTSMART_3RD_PARTY_ENABLE_NIMBLE)
+ifneq ($(RTSMART_LINK_NIMBLE),y)
+lib3rd_party_libs := $(filter-out $(lib3rd_party_lib_dir)/libnimble.a,$(lib3rd_party_libs))
+else
+LIB_CFLAGS += -include $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include/nimble/nimble_port_config.h
+endif
 
 ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_LIBPEER),y)
 lib3rd_party_inc_dir += $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include/libpeer

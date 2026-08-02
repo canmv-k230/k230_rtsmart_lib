@@ -11,6 +11,7 @@ subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_TUYALINKSDK) += tuya-iot-core-sdk
 subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_CJSON) += cjson
 subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_LIBPEER) += libpeer
 subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_LIBWEBSOCKETS) += libwebsockets
+subdirs-$(CONFIG_RTSMART_3RD_PARTY_ENABLE_NIMBLE) += nimble
 
 .PHONY: all clean distclean
 
@@ -25,6 +26,7 @@ $(subdirs-y):
 	@$(MAKE) -C $@ all
 
 libpeer: mbedtls cjson
+nimble: mbedtls
 endif
 
 clean:

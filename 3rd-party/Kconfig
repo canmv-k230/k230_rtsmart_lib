@@ -1,5 +1,14 @@
 menu "RT-Smart 3rd-party Configuration"
 
+    config RTSMART_3RD_PARTY_ENABLE_NIMBLE
+        bool "Enable Build NimBLE host stack"
+        default n
+        select RTSMART_3RD_PARTY_ENABLE_MBEDTLS
+        help
+            Build the NimBLE GAP, GATT, L2CAP, and SMP host stack for
+            RT-Smart user-space applications. A Bluetooth H:4 controller
+            device such as /dev/hci0 is required at runtime.
+
     config RTSMART_3RD_PARTY_ENABLE_FREETYPE
         bool "Enable Build FreeType"
         default y
