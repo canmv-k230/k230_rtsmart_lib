@@ -19,7 +19,8 @@ subdirs-y := \
 	onewire \
 	touch \
 	gzip_decomp \
-	pufs
+	pufs \
+	hci
 
 subdirs-$(CONFIG_ENABLE_ROTARY_ENCODER) += rotary_encoder
 
