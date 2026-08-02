@@ -15,11 +15,11 @@ all: $(SUBDIRS)
 
 $(SUBDIRS):
 	@echo "[BUILD] libpeer 3rd-party $@"
-	@$(MAKE) -C $@ all || exit $?;
+	@$(MAKE) -C $@ all
 
 clean:
 	@for dir in $(SUBDIRS); do \
 		echo "[CLEAN] libpeer 3rd-party $$dir"; \
-		$(MAKE) -C $$dir clean || exit $?; \
+		$(MAKE) -C $$dir clean || exit $$?; \
 	done
 	@rm -rf $(LIB_DIR)

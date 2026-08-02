@@ -97,10 +97,10 @@ OBJ_DIRS := $(sort $(dir $(OBJS) $(LIB)))
 # --- 3rd-party sub-library build ---
 .PHONY: sub-libs sub-libs-clean
 sub-libs:
-	@$(MAKE) -C 3rd-party all || exit $?;
+	@$(MAKE) -C 3rd-party all
 
 sub-libs-clean:
-	@$(MAKE) -C 3rd-party clean || exit $?;
+	@$(MAKE) -C 3rd-party clean
 
 # --- main build ---
 .PHONY: all

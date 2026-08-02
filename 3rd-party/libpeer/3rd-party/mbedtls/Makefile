@@ -20,11 +20,11 @@ all: mbedtls_library
 
 .PHONY: mbedtls_library
 mbedtls_library: | $(LIB_DIR)
-	@$(MAKE) -C library CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)' || exit $?;
+	@$(MAKE) -C library CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)'
 
 .PHONY: clean
 clean:
-	@$(MAKE) -C library clean || exit $?;
+	@$(MAKE) -C library clean
 	@rm -rf $(LIB_DIR)/libmbedtls*.a
 
 $(LIB_DIR):

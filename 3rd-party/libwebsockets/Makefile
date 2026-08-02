@@ -121,7 +121,7 @@ $(SOURCE_STAMP): Makefile $(PATCH_DIR) $(PATCHES) $(OVERLAY_DIR) $(OVERLAY_FILES
 	@if [ -z "$(UPSTREAM_REV)" ]; then echo "[ERROR] $(UPSTREAM) is not a git checkout"; exit 1; fi
 	@rm -rf $(UPSTREAM_SRC)
 	@$(MKDIR) -p $(UPSTREAM_SRC)
-	@git -C $(UPSTREAM) archive --format=tar $(UPSTREAM_REV) | tar -xf - -C $(UPSTREAM_SRC) || exit $$?
+	@git -C $(UPSTREAM) archive --format=tar $(UPSTREAM_REV) | tar -xf - -C $(UPSTREAM_SRC)
 	@if [ -d "$(OVERLAY_DIR)" ]; then cp -a "$(OVERLAY_DIR)/." "$(UPSTREAM_SRC)/"; fi
 	@set -e; \
 	if [ -n "$(PATCHES)" ]; then \
@@ -135,7 +135,7 @@ $(SOURCE_STAMP): Makefile $(PATCH_DIR) $(PATCHES) $(OVERLAY_DIR) $(OVERLAY_FILES
 
 $(CMAKE_STAMP): $(SOURCE_STAMP) $(CMAKE_TOOLCHAIN) | $(BUILD_DIR)
 	@echo "[CMAKE] configuring $(DIR) ..."
-	@cd $(BUILD_DIR) && $(CMAKE) --fresh $(CMAKE_FLAGS) $(UPSTREAM_SRC) || exit $$?
+	@cd $(BUILD_DIR) && $(CMAKE) --fresh $(CMAKE_FLAGS) $(UPSTREAM_SRC)
 	@touch $@
 
 cmake-configure: $(CMAKE_STAMP)
@@ -143,7 +143,7 @@ cmake-configure: $(CMAKE_STAMP)
 # ---- build via cmake ----
 $(BUILD_DIR)/lib/libwebsockets.a: $(CMAKE_STAMP)
 	@echo "[CMAKE] building $(DIR) ..."
-	@$(CMAKE) --build $(BUILD_DIR) --target websockets -- -j$$(nproc) || exit $$?
+	@$(CMAKE) --build $(BUILD_DIR) --target websockets -- -j$$(nproc)
 
 # ---- copy static lib + install headers ----
 $(LIB): $(BUILD_DIR)/lib/libwebsockets.a

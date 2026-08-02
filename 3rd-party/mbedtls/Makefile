@@ -51,25 +51,25 @@ LDFLAGS_MBEDTLS := -n --static -T $(LOCAL_SRC_DIR)/port/link.lds -L$(RTSMART_3RD
 
 .PHONY: mbedtls_library
 mbedtls_library:
-	@$(MAKE) -C mbedtls/library CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)' || exit $?;
+	@$(MAKE) -C mbedtls/library CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)'
 
 .PHONY: mbedtls_library-clean
 mbedtls_library-clean:
-	@$(MAKE) -C mbedtls/library clean || exit $?;
+	@$(MAKE) -C mbedtls/library clean
 
 .PHONY: mbedtls_tests
 mbedtls_tests: mbedtls_library $(LIB)
 ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS_TESTS),y)
-	@$(MAKE) -C mbedtls/tests mbedtls_test CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)' || exit $?;
-	@$(MAKE) -C mbedtls/programs CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)' || exit $?;
-	@$(MAKE) -C mbedtls/programs/fuzz CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)' || exit $?;
+	@$(MAKE) -C mbedtls/tests mbedtls_test CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)'
+	@$(MAKE) -C mbedtls/programs CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)'
+	@$(MAKE) -C mbedtls/programs/fuzz CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)'
 endif
 
 .PHONY: mbedtls_tests-clean
 mbedtls_tests-clean:
 ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_MBEDTLS_TESTS),y)
 	@$(MAKE) -C mbedtls/tests clean
-	@$(MAKE) -C mbedtls/programs clean || exit $?;
+	@$(MAKE) -C mbedtls/programs clean
 endif
 
 .PHONY: all
