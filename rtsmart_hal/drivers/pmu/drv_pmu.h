@@ -31,39 +31,31 @@ extern "C" {
 #endif
 
 typedef struct drv_pmu_inst drv_pmu_inst_t;
-typedef uint32_t drv_pmu_event_t;
-
-#define DRV_PMU_EVENT_LONG_PRESS                0x00000001U
-#define DRV_PMU_EVENT_KEY_RELEASE               0x00000002U
 
 int drv_pmu_inst_create(drv_pmu_inst_t **inst);
 void drv_pmu_inst_destroy(drv_pmu_inst_t **inst);
 
-int drv_pmu_register_notify(drv_pmu_inst_t *inst, int signo);
-int drv_pmu_unregister_notify(drv_pmu_inst_t *inst);
+/* Power-key shutdown request handling. Short presses are consumed in-kernel. */
+int drv_pmu_key_register_notify(drv_pmu_inst_t *inst, int signo);
+int drv_pmu_key_unregister_notify(drv_pmu_inst_t *inst);
+int drv_pmu_key_wait_shutdown(drv_pmu_inst_t *inst, int timeout_ms);
+/* Confirm shutdown after user-space cleanup is complete. */
+int drv_pmu_key_confirm_shutdown(drv_pmu_inst_t *inst);
 
-int drv_pmu_wait_event(drv_pmu_inst_t *inst, drv_pmu_event_t *event,
-                       int timeout_ms);
-int drv_pmu_ack_shutdown(drv_pmu_inst_t *inst);
+/* Shut down immediately; this deliberately bypasses the long-press policy. */
+int drv_pmu_shutdown_now(drv_pmu_inst_t *inst);
+
+/* Read the current level of the configured shutdown wakeup pad. */
+int drv_pmu_wakeup_pad_get_level(drv_pmu_inst_t *inst, int *level);
 
 /*
  * Schedule shutdown after shutdown_after_s seconds, then power on after
  * another poweron_after_s seconds.
  */
-int drv_pmu_schedule_power_cycle(drv_pmu_inst_t *inst,
-                                 uint32_t shutdown_after_s,
-                                 uint32_t poweron_after_s);
-int drv_pmu_cancel_power_cycle(drv_pmu_inst_t *inst);
-
-static inline int drv_pmu_event_has_long_press(drv_pmu_event_t event)
-{
-    return (event & DRV_PMU_EVENT_LONG_PRESS) != 0U;
-}
-
-static inline int drv_pmu_event_has_key_release(drv_pmu_event_t event)
-{
-    return (event & DRV_PMU_EVENT_KEY_RELEASE) != 0U;
-}
+int drv_pmu_rtc_schedule_power_cycle(drv_pmu_inst_t *inst,
+                                     uint32_t shutdown_after_s,
+                                     uint32_t poweron_after_s);
+int drv_pmu_rtc_cancel_power_cycle(drv_pmu_inst_t *inst);
 
 #ifdef __cplusplus
 }

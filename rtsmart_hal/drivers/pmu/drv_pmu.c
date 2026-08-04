@@ -51,17 +51,13 @@
 
 #define DRV_PMU_DEV_PATH                        "/dev/pmu_pwrkey"
 #define DRV_PMU_DEFAULT_SIGNO                   SIGUSR1
-#define DRV_PMU_EVENT_MASK                      \
-    (DRV_PMU_EVENT_LONG_PRESS | DRV_PMU_EVENT_KEY_RELEASE)
-
 struct drv_pmu_notify_cfg {
     int32_t pid;
     int32_t signo;
 };
 
-struct drv_pmu_raw_event {
-    uint32_t events;
-    uint32_t reserved;
+struct drv_pmu_shutdown_request {
+    uint32_t pending;
 };
 
 struct drv_pmu_power_cycle_cfg {
@@ -71,18 +67,26 @@ struct drv_pmu_power_cycle_cfg {
     uint32_t reserved;
 };
 
+struct drv_pmu_wakeup_pad_level {
+    int32_t level;
+};
+
 #define PMU_IOCTL_REGISTER_NOTIFY \
     _IOW('P', 0x00, struct drv_pmu_notify_cfg)
 #define PMU_IOCTL_UNREGISTER_NOTIFY \
-    _IOW('P', 0x01, struct drv_pmu_notify_cfg)
-#define PMU_IOCTL_GET_EVENT \
-    _IOR('P', 0x02, struct drv_pmu_raw_event)
-#define PMU_IOCTL_SHUTDOWN_ACK \
-    _IOW('P', 0x03, struct drv_pmu_raw_event)
+    _IO('P', 0x01)
+#define PMU_IOCTL_GET_SHUTDOWN_REQUEST \
+    _IOR('P', 0x02, struct drv_pmu_shutdown_request)
+#define PMU_IOCTL_CONFIRM_SHUTDOWN \
+    _IO('P', 0x03)
 #define PMU_IOCTL_SCHEDULE_POWER_CYCLE \
     _IOW('P', 0x04, struct drv_pmu_power_cycle_cfg)
 #define PMU_IOCTL_CANCEL_POWER_CYCLE \
     _IO('P', 0x05)
+#define PMU_IOCTL_SHUTDOWN_NOW \
+    _IO('P', 0x06)
+#define PMU_IOCTL_GET_WAKEUP_PAD_LEVEL \
+    _IOR('P', 0x07, struct drv_pmu_wakeup_pad_level)
 
 struct drv_pmu_inst {
     int fd;
@@ -143,17 +147,16 @@ static int drv_pmu_wait_signal(drv_pmu_inst_t *inst, int timeout_ms)
     return -1;
 }
 
-static int drv_pmu_read_event(drv_pmu_inst_t *inst, drv_pmu_event_t *event)
+static int drv_pmu_read_shutdown_request(drv_pmu_inst_t *inst)
 {
-    struct drv_pmu_raw_event raw_event;
+    struct drv_pmu_shutdown_request request;
 
-    memset(&raw_event, 0, sizeof(raw_event));
-    if (drv_pmu_ioctl(inst, PMU_IOCTL_GET_EVENT, &raw_event,
-              "[hal_pmu] ioctl(GET_EVENT)") < 0)
+    memset(&request, 0, sizeof(request));
+    if (drv_pmu_ioctl(inst, PMU_IOCTL_GET_SHUTDOWN_REQUEST, &request,
+              "[hal_pmu] ioctl(GET_SHUTDOWN_REQUEST)") < 0)
         return -1;
 
-    *event = raw_event.events & DRV_PMU_EVENT_MASK;
-    return 0;
+    return request.pending != 0U ? 0 : 1;
 }
 
 static int drv_pmu_block_signal(drv_pmu_inst_t *inst, int signo)
@@ -241,7 +244,7 @@ void drv_pmu_inst_destroy(drv_pmu_inst_t **inst)
 
     pmu = *inst;
 
-    drv_pmu_unregister_notify(pmu);
+    drv_pmu_key_unregister_notify(pmu);
 
     if (pmu->fd >= 0) {
         close(pmu->fd);
@@ -252,7 +255,7 @@ void drv_pmu_inst_destroy(drv_pmu_inst_t **inst)
     *inst = NULL;
 }
 
-int drv_pmu_register_notify(drv_pmu_inst_t *inst, int signo)
+int drv_pmu_key_register_notify(drv_pmu_inst_t *inst, int signo)
 {
     struct drv_pmu_notify_cfg cfg = {
         .pid = 0,
@@ -263,7 +266,7 @@ int drv_pmu_register_notify(drv_pmu_inst_t *inst, int signo)
         return -1;
 
     if (inst->notify_registered) {
-        if (drv_pmu_unregister_notify(inst) < 0)
+        if (drv_pmu_key_unregister_notify(inst) < 0)
             return -1;
     }
 
@@ -280,7 +283,7 @@ int drv_pmu_register_notify(drv_pmu_inst_t *inst, int signo)
     return 0;
 }
 
-int drv_pmu_unregister_notify(drv_pmu_inst_t *inst)
+int drv_pmu_key_unregister_notify(drv_pmu_inst_t *inst)
 {
     int ret = 0;
 
@@ -301,36 +304,30 @@ int drv_pmu_unregister_notify(drv_pmu_inst_t *inst)
     return ret;
 }
 
-int drv_pmu_wait_event(drv_pmu_inst_t *inst, drv_pmu_event_t *event,
-                       int timeout_ms)
+int drv_pmu_key_wait_shutdown(drv_pmu_inst_t *inst, int timeout_ms)
 {
     int ret;
 
-    if ((inst == NULL) || (event == NULL) || !inst->notify_registered)
+    if ((inst == NULL) || !inst->notify_registered)
         return -1;
 
-    *event = 0;
     ret = drv_pmu_wait_signal(inst, timeout_ms);
     if (ret != 0)
         return ret;
 
-    return drv_pmu_read_event(inst, event);
+    ret = drv_pmu_read_shutdown_request(inst);
+    return ret;
 }
 
-int drv_pmu_ack_shutdown(drv_pmu_inst_t *inst)
+int drv_pmu_key_confirm_shutdown(drv_pmu_inst_t *inst)
 {
-    struct drv_pmu_raw_event event = {
-        .events = DRV_PMU_EVENT_KEY_RELEASE,
-        .reserved = 0,
-    };
-
-    return drv_pmu_ioctl(inst, PMU_IOCTL_SHUTDOWN_ACK, &event,
-                 "[hal_pmu] ioctl(SHUTDOWN_ACK)");
+    return drv_pmu_ioctl(inst, PMU_IOCTL_CONFIRM_SHUTDOWN, NULL,
+                 "[hal_pmu] ioctl(CONFIRM_SHUTDOWN)");
 }
 
-int drv_pmu_schedule_power_cycle(drv_pmu_inst_t *inst,
-                                 uint32_t shutdown_after_s,
-                                 uint32_t poweron_after_s)
+int drv_pmu_rtc_schedule_power_cycle(drv_pmu_inst_t *inst,
+                                     uint32_t shutdown_after_s,
+                                     uint32_t poweron_after_s)
 {
     struct drv_pmu_power_cycle_cfg cfg = {
         .shutdown_after_s = shutdown_after_s,
@@ -343,8 +340,37 @@ int drv_pmu_schedule_power_cycle(drv_pmu_inst_t *inst,
                  "[hal_pmu] ioctl(SCHEDULE_POWER_CYCLE)");
 }
 
-int drv_pmu_cancel_power_cycle(drv_pmu_inst_t *inst)
+int drv_pmu_rtc_cancel_power_cycle(drv_pmu_inst_t *inst)
 {
     return drv_pmu_ioctl(inst, PMU_IOCTL_CANCEL_POWER_CYCLE, NULL,
                  "[hal_pmu] ioctl(CANCEL_POWER_CYCLE)");
+}
+
+int drv_pmu_shutdown_now(drv_pmu_inst_t *inst)
+{
+    return drv_pmu_ioctl(inst, PMU_IOCTL_SHUTDOWN_NOW, NULL,
+                 "[hal_pmu] ioctl(SHUTDOWN_NOW)");
+}
+
+int drv_pmu_wakeup_pad_get_level(drv_pmu_inst_t *inst, int *level)
+{
+    struct drv_pmu_wakeup_pad_level result;
+
+    if (level == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    memset(&result, 0, sizeof(result));
+    if (drv_pmu_ioctl(inst, PMU_IOCTL_GET_WAKEUP_PAD_LEVEL, &result,
+              "[hal_pmu] ioctl(GET_WAKEUP_PAD_LEVEL)") < 0)
+        return -1;
+
+    if ((result.level != 0) && (result.level != 1)) {
+        errno = EIO;
+        return -1;
+    }
+
+    *level = result.level;
+    return 0;
 }
