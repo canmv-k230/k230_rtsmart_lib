@@ -4,6 +4,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <time.h>
 
 #include "config.h"
 
@@ -187,9 +188,24 @@ int ports_resolve_addr(const char* host, Address* addr) {
 }
 
 uint32_t ports_get_epoch_time() {
-  struct timeval tv;
-  gettimeofday(&tv, NULL);
-  return (uint32_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+  /*
+   * Use CLOCK_MONOTONIC instead of gettimeofday() to avoid NTP time jumps.
+   *
+   * Problem: On embedded devices, the system clock starts at epoch 0 (1970)
+   * and jumps to the correct time when NTP sync completes. If gettimeofday()
+   * is used, any timeout calculation like (now - start > timeout) will see
+   * a huge delta after the NTP jump, falsely triggering timeouts.
+   *
+   * CLOCK_MONOTONIC is guaranteed to never jump backwards or forwards due
+   * to NTP/system clock adjustments — it only moves forward at a steady rate.
+   * This is the correct clock for all interval/timeout measurements.
+   *
+   * Note: coreMQTT also uses this function for keepalive timing, so this
+   * fix prevents MQTT disconnections on NTP sync as well.
+   */
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint32_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
 void ports_sleep_ms(int ms) {

@@ -172,10 +172,10 @@ void stun_parse_msg_buf(StunMessage* msg) {
         break;
       case STUN_ATTR_TYPE_USERNAME:
         memset(msg->username, 0, sizeof(msg->username));
-        memcpy(msg->username, attr->value, attr_len);
+        memcpy(msg->username, attr->value, attr_len < sizeof(msg->username) ? attr_len : sizeof(msg->username) - 1);
         break;
       case STUN_ATTR_TYPE_MESSAGE_INTEGRITY:
-        memcpy(msg->message_integrity, attr->value, attr_len);
+        memcpy(msg->message_integrity, attr->value, attr_len < sizeof(msg->message_integrity) ? attr_len : sizeof(msg->message_integrity));
 
         char message_integrity_hex[41];
 
@@ -208,12 +208,12 @@ void stun_parse_msg_buf(StunMessage* msg) {
         break;
       case STUN_ATTR_TYPE_REALM:
         memset(msg->realm, 0, sizeof(msg->realm));
-        memcpy(msg->realm, attr->value, attr_len);
+        memcpy(msg->realm, attr->value, attr_len < sizeof(msg->realm) ? attr_len : sizeof(msg->realm) - 1);
         LOGD("Realm %s", msg->realm);
         break;
       case STUN_ATTR_TYPE_NONCE:
         memset(msg->nonce, 0, sizeof(msg->nonce));
-        memcpy(msg->nonce, attr->value, attr_len);
+        memcpy(msg->nonce, attr->value, attr_len < sizeof(msg->nonce) ? attr_len : sizeof(msg->nonce) - 1);
         LOGD("Nonce %s", msg->nonce);
         break;
       case STUN_ATTR_TYPE_XOR_RELAYED_ADDRESS:
@@ -233,7 +233,7 @@ void stun_parse_msg_buf(StunMessage* msg) {
         // LOGD("Use Candidate");
         break;
       case STUN_ATTR_TYPE_FINGERPRINT:
-        memcpy(&msg->fingerprint, attr->value, attr_len);
+        memcpy(&msg->fingerprint, attr->value, attr_len < sizeof(msg->fingerprint) ? attr_len : sizeof(msg->fingerprint));
         break;
       case STUN_ATTR_TYPE_ICE_CONTROLLED:
       case STUN_ATTR_TYPE_ICE_CONTROLLING:
