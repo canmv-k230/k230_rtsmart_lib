@@ -10,7 +10,9 @@
 #include <poll.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 struct drv_hci_inst {
@@ -109,6 +111,43 @@ int drv_hci_inst_create(const char *device, drv_hci_inst_t **inst)
 
     *inst = new_inst;
     return 0;
+}
+
+int drv_hci_inst_create_auto(drv_hci_inst_t **inst, char *device,
+                             size_t device_size)
+{
+    char path[sizeof(DRV_HCI_DEFAULT_DEVICE) + 12];
+    int last_error = -ENOENT;
+    unsigned int index;
+
+    if (!inst || (device && device_size == 0)) {
+        return -EINVAL;
+    }
+
+    for (index = 0; index < DRV_HCI_AUTO_MAX_DEVICES; ++index) {
+        int length = snprintf(path, sizeof(path), "/dev/hci%u", index);
+        int result;
+
+        if (length < 0 || (size_t)length >= sizeof(path)) {
+            return -ENAMETOOLONG;
+        }
+        result = drv_hci_inst_create(path, inst);
+        if (result == 0) {
+            if (device) {
+                if ((size_t)length >= device_size) {
+                    drv_hci_inst_destroy(inst);
+                    return -ENAMETOOLONG;
+                }
+                memcpy(device, path, (size_t)length + 1);
+            }
+            return 0;
+        }
+        if (result != -ENOENT || last_error == -ENOENT) {
+            last_error = result;
+        }
+    }
+
+    return last_error;
 }
 
 void drv_hci_inst_destroy(drv_hci_inst_t **inst)

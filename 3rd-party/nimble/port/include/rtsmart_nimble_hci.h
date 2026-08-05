@@ -9,8 +9,13 @@
 extern "C" {
 #endif
 
-/* Select the H:4 character device before calling ble_hci_uart_init(). */
+/* Select the H:4 character device before calling ble_hci_uart_init(). Passing
+ * NULL explicitly clears a previous selection and restores automatic discovery
+ * of the first available /dev/hciX controller. */
 int rtsmart_nimble_hci_set_device(const char *device);
+
+/* Returns the selected path after NimBLE has initialized the HCI transport. */
+const char *rtsmart_nimble_hci_get_device(void);
 
 #ifdef __cplusplus
 }

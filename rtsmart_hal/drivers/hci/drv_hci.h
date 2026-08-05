@@ -13,6 +13,7 @@ extern "C" {
 #include <sys/types.h>
 
 #define DRV_HCI_DEFAULT_DEVICE "/dev/hci0"
+#define DRV_HCI_AUTO_MAX_DEVICES 64
 
 #define DRV_HCI_H4_CMD 0x01
 #define DRV_HCI_H4_ACL 0x02
@@ -24,6 +25,11 @@ typedef struct drv_hci_inst drv_hci_inst_t;
 
 /* Opening the device starts the controller; destroying it stops the controller. */
 int drv_hci_inst_create(const char *device, drv_hci_inst_t **inst);
+
+/* Open the first available /dev/hciX controller.  When device is non-NULL,
+ * the selected path is copied into the supplied buffer. */
+int drv_hci_inst_create_auto(drv_hci_inst_t **inst, char *device,
+                             size_t device_size);
 void drv_hci_inst_destroy(drv_hci_inst_t **inst);
 
 /* RX returns raw H:4 bytes; reads are not packet-aligned, so callers must buffer and parse the stream. */

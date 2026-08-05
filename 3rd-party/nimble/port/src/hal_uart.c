@@ -22,8 +22,9 @@ static drv_hci_inst_t *hci_inst;
 static pthread_t hci_rx_thread;
 static bool hci_rx_thread_started;
 static volatile bool hci_rx_running;
+static bool hci_device_auto = true;
 static pthread_mutex_t hci_tx_lock = PTHREAD_MUTEX_INITIALIZER;
-static char hci_device[HCI_DEVICE_PATH_MAX] = DRV_HCI_DEFAULT_DEVICE;
+static char hci_device[HCI_DEVICE_PATH_MAX];
 
 static hal_uart_tx_cb_t tx_callback;
 static void *tx_callback_arg;
@@ -55,18 +56,27 @@ int rtsmart_nimble_hci_set_device(const char *device)
 {
     size_t length;
 
-    if (!device) {
-        return -EINVAL;
-    }
     if (hci_inst) {
         return -EBUSY;
+    }
+    if (!device) {
+        /* NULL intentionally restores the default automatic selection mode. */
+        hci_device_auto = true;
+        hci_device[0] = '\0';
+        return 0;
     }
     length = strlen(device);
     if (length == 0 || length >= sizeof(hci_device)) {
         return -EINVAL;
     }
+    hci_device_auto = false;
     memcpy(hci_device, device, length + 1);
     return 0;
+}
+
+const char *rtsmart_nimble_hci_get_device(void)
+{
+    return hci_device[0] ? hci_device : NULL;
 }
 
 static void *hci_rx_worker(void *arg)
@@ -131,8 +141,21 @@ int hal_uart_config(uint32_t port, uint32_t baud, uint32_t bits,
         return 0;
     }
 
-    result = drv_hci_inst_create(hci_device, &hci_inst);
+    if (hci_device_auto) {
+        result = drv_hci_inst_create_auto(&hci_inst, hci_device,
+                                          sizeof(hci_device));
+    } else {
+        result = drv_hci_inst_create(hci_device, &hci_inst);
+    }
     if (result != 0) {
+        if (hci_device_auto) {
+            fprintf(stderr,
+                    "nimble: automatic HCI device selection failed: %s (%d)\n",
+                    strerror(-result), result);
+        } else {
+            fprintf(stderr, "nimble: cannot open HCI device %s: %s (%d)\n",
+                    hci_device, strerror(-result), result);
+        }
         return result;
     }
     hci_rx_running = true;
