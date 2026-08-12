@@ -74,16 +74,18 @@ int ports_get_host_addr(Address* addr, const char* iface_prefix) {
     strncpy(ifr.ifr_name, iface_prefix, sizeof(ifr.ifr_name) - 1);
 
     if (ioctl(sock, SIOCGIFADDR, &ifr) == 0) {
-      memcpy(&addr->sin, &ifr.ifr_addr, sizeof(struct sockaddr_in));
-      ret = 1;
+      struct sockaddr_in* sin = (struct sockaddr_in*)&ifr.ifr_addr;
+      if (sin->sin_addr.s_addr != htonl(INADDR_ANY)) {
+        addr->sin.sin_family = AF_INET;
+        memcpy(&addr->sin.sin_addr, &sin->sin_addr, sizeof(struct in_addr));
+        ret = 1;
+      }
     } else {
       LOGD("SIOCGIFADDR failed for %s: %s", ifr.ifr_name, strerror(errno));
     }
 
     close(sock);
   } else {
-    static const char* ifnames[] = {"u0", "e0", "eth0", "en0", "w0", "wlan0", NULL};
-
 #if CONFIG_USE_GETIFADDRS
     struct ifaddrs* ifaddr;
     struct ifaddrs* ifa;
@@ -99,7 +101,9 @@ int ports_get_host_addr(Address* addr, const char* iface_prefix) {
         if (ifa->ifa_addr->sa_family != AF_INET) continue;
         if (!(ifa->ifa_flags & IFF_UP)) continue;
 
-        memcpy(&addr->sin, ifa->ifa_addr, sizeof(struct sockaddr_in));
+        struct sockaddr_in* sin = (struct sockaddr_in*)ifa->ifa_addr;
+        addr->sin.sin_family = AF_INET;
+        memcpy(&addr->sin.sin_addr, &sin->sin_addr, sizeof(struct in_addr));
         ret = 1;
         break;
       }
@@ -117,19 +121,17 @@ int ports_get_host_addr(Address* addr, const char* iface_prefix) {
       return -1;
     }
 
+    /* RT-Smart resolves an unnamed SIOCGIFADDR request through the current
+     * default route. Standard hosts normally return above via getifaddrs(). */
     struct ifreq ifr;
-    for (int i = 0; ifnames[i] != NULL; i++) {
-      memset(&ifr, 0, sizeof(ifr));
-      strncpy(ifr.ifr_name, ifnames[i], sizeof(ifr.ifr_name) - 1);
-
-      if (ioctl(sock, SIOCGIFADDR, &ifr) == 0) {
-        struct sockaddr_in* sin = (struct sockaddr_in*)&ifr.ifr_addr;
-        if (sin->sin_addr.s_addr != htonl(INADDR_ANY)) {
-          memcpy(&addr->sin, sin, sizeof(struct sockaddr_in));
-          ret = 1;
-          LOGI("Got host IP from %s", ifnames[i]);
-          break;
-        }
+    memset(&ifr, 0, sizeof(ifr));
+    if (ioctl(sock, SIOCGIFADDR, &ifr) == 0) {
+      struct sockaddr_in* sin = (struct sockaddr_in*)&ifr.ifr_addr;
+      if (sin->sin_addr.s_addr != htonl(INADDR_ANY)) {
+        addr->sin.sin_family = AF_INET;
+        memcpy(&addr->sin.sin_addr, &sin->sin_addr, sizeof(struct in_addr));
+        ret = 1;
+        LOGI("Got host IP from the default route");
       }
     }
 

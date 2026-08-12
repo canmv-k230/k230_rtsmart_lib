@@ -94,10 +94,22 @@ enum rt_802_11_band_t {
 };
 
 enum rt_netif_t {
-    RT_NET_DEV_WLAN_STA    = 0,
-    RT_NET_DEV_WLAN_AP     = 1,
-    RT_NET_DEV_USB_RTL8152 = 2,
-    RT_NET_DEV_USB_ECM     = 3,
+    RT_NET_DEV_WLAN_STA = 0,
+    RT_NET_DEV_WLAN_AP  = 1,
+    /* Generic LAN selects RTL8152, ECM, or NCM netdevs. */
+    RT_NET_DEV_LAN      = 2,
+
+    /* Source-compatible names for the original hardware-specific API. */
+    RT_NET_DEV_USB_RTL8152 = RT_NET_DEV_LAN,
+    RT_NET_DEV_USB_ECM     = RT_NET_DEV_LAN,
+    RT_NET_DEV_USB_NCM     = RT_NET_DEV_LAN,
+};
+
+enum netmgmt_wlan_device {
+    NETMGMT_WLAN_DEVICE_AUTO = 0,
+    NETMGMT_WLAN_DEVICE_USB,
+    NETMGMT_WLAN_DEVICE_SDIO,
+    NETMGMT_WLAN_DEVICE_SPI,
 };
 
 struct rt_wlan_ssid_t {
@@ -138,6 +150,15 @@ struct ifconfig_t {
     struct ip_addr_t netmask; /* subnet mask */
     struct ip_addr_t dns; /* DNS server */
 };
+
+/**
+ * @brief Select the physical WLAN radio used by subsequent role-based calls.
+ * @param[in] device Automatic, USB, SDIO, or SPI radio selection.
+ * @param[in] itf Station or AP role.
+ * @return 0 on success, -1 when the selected radio is unavailable.
+ */
+int netmgmt_wlan_select_device(enum netmgmt_wlan_device device,
+                               enum rt_netif_t itf);
 
 /**
  * @brief Get whether STA auto-reconnect is enabled.
@@ -294,7 +315,7 @@ int netmgmt_wlan_ap_set_country(int country);
 /**
  * @brief Checks if a LAN interface is connected.
  * This is determined by both the physical link being up and a valid IP address being assigned.
- * @param[in] itf The network interface enum (e.g., `RT_NET_DEV_USB_RTL8152`).
+ * @param[in] itf The network interface enum (e.g., `RT_NET_DEV_LAN`).
  * @param[out] status Pointer to an integer to store the connection status: 1 if connected, 0 if not.
  * @return 0 on success, -1 on failure.
  */
@@ -330,14 +351,23 @@ int netmgmt_lan_set_mac(enum rt_netif_t itf, uint8_t mac[RT_WLAN_BSSID_MAX_LENGT
  * @param[out] name Buffer to store device name (32 bytes).
  * @return 0 on success, -1 on failure.
  */
-int netmgmt_utils_get_defeault_dev(char name[32]);
+int netmgmt_utils_get_default_dev(char name[32]);
+
+int netmgmt_utils_get_defeault_dev(char name[32])
+    __attribute__((deprecated(
+        "use netmgmt_utils_get_default_dev() instead")));
 
 /**
  * @brief Set default network device.
- * @param[in] name Name of the network device.
+ * @param[in] name Name of the preferred network device, or NULL to use
+ * automatic route selection.
  * @return 0 on success, -1 on failure.
  */
-int netmgmt_utils_set_defeault_dev(char name[32]);
+int netmgmt_utils_set_default_dev(char name[32]);
+
+int netmgmt_utils_set_defeault_dev(char name[32])
+    __attribute__((deprecated(
+        "use netmgmt_utils_set_default_dev() instead")));
 
 /**
  * @brief Get list of all network device names.
@@ -354,6 +384,14 @@ int netmgmt_utils_get_dev_list(int* dev_num, char names[NET_DEV_MAX_CNT][32]);
  * @return 0 on success, -1 on failure.
  */
 int netmgmt_utils_probe_device(enum rt_netif_t itf, int* status);
+
+/**
+ * @brief Resolve a logical interface to its current netdev name.
+ * @param[in] itf Logical interface type.
+ * @param[out] name Buffer to store the netdev name (32 bytes).
+ * @return 0 on success, -1 while the interface is unavailable.
+ */
+int netmgmt_utils_get_netdev_name(enum rt_netif_t itf, char name[32]);
 
 /**
  * @brief Get network interface IP configuration.

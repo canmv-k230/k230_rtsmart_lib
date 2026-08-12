@@ -61,6 +61,7 @@
 #define IOCTRL_WM_AP_DEAUTH_STA   _IOWR('N', 0x25, void*)
 #define IOCTRL_WM_AP_GET_COUNTRY  _IOWR('N', 0x26, void*)
 #define IOCTRL_WM_AP_SET_COUNTRY  _IOWR('N', 0x27, void*)
+#define IOCTRL_WM_SELECT_DEVICE   _IOWR('N', 0x30, void*)
 
 // lan
 #define IOCTRL_LAN_GET_ISCONNECTED _IOWR('N', 0x80, void*)
@@ -74,6 +75,7 @@
 #define IOCTRL_NET_GET_DEV_DEFAULT _IOWR('N', 0x102, void*)
 #define IOCTRL_NET_GET_DEV_LIST    _IOWR('N', 0x103, void*)
 #define IOCTRL_NET_PROBE           _IOWR('N', 0x104, void*)
+#define IOCTRL_NET_GET_DEV_NAME    _IOWR('N', 0x105, void*)
 
 #define INVALID_INFO(_info)                                                                                                    \
     do {                                                                                                                       \
@@ -124,6 +126,16 @@ struct lan_mac_cmd_wrap_t {
     uint8_t mac[6];
 };
 
+struct netdev_name_cmd {
+    enum rt_netif_t itf;
+    char name[32];
+};
+
+struct netmgmt_wlan_select_cmd {
+    int device;
+    int itf;
+};
+
 static int _netmgmt_ioctl(uint32_t cmd, void* arg)
 {
     int result = -1;
@@ -144,6 +156,21 @@ static int _netmgmt_ioctl(uint32_t cmd, void* arg)
     // }
 
     return result;
+}
+
+int netmgmt_wlan_select_device(enum netmgmt_wlan_device device,
+                               enum rt_netif_t itf)
+{
+    struct netmgmt_wlan_select_cmd command;
+
+    if (device < NETMGMT_WLAN_DEVICE_AUTO ||
+        device > NETMGMT_WLAN_DEVICE_SPI ||
+        (itf != RT_NET_DEV_WLAN_STA && itf != RT_NET_DEV_WLAN_AP)) {
+        return -1;
+    }
+    command.device = device;
+    command.itf = itf;
+    return _netmgmt_ioctl(IOCTRL_WM_SELECT_DEVICE, &command) == 0 ? 0 : -1;
 }
 
 static int _netmgmt_ioctl_with_type_rt_wlan_connect_config(uint32_t cmd, struct rt_wlan_ssid_t* ssid,
@@ -676,9 +703,9 @@ int netmgmt_lan_set_mac(enum rt_netif_t itf, uint8_t mac[RT_WLAN_BSSID_MAX_LENGT
 // int netmgmt_lan_set_hostname(char* hostname) { }
 
 /* utils */
-int netmgmt_utils_get_defeault_dev(char name[32])
+int netmgmt_utils_get_default_dev(char name[32])
 {
-    char _name[32];
+    char _name[32] = {0};
 
     if (0x00 != _netmgmt_ioctl(IOCTRL_NET_GET_DEV_DEFAULT, &_name[0])) {
         printf("[hal_netmgmt]: %s failed\n", __FUNCTION__);
@@ -686,22 +713,20 @@ int netmgmt_utils_get_defeault_dev(char name[32])
     }
 
     if (name) {
-        strncpy(name, _name, sizeof(_name));
+        memcpy(name, _name, sizeof(_name));
+        name[sizeof(_name) - 1] = '\0';
     }
 
     return 0;
 }
 
-int netmgmt_utils_set_defeault_dev(char name[32])
+int netmgmt_utils_set_default_dev(char name[32])
 {
-    char _name[32];
+    char _name[32] = {0};
 
-    if (!name) {
-        printf("[hal_netmgmt]: %s invalid args\n", __FUNCTION__);
-        return -1;
+    if (name) {
+        strncpy(_name, name, sizeof(_name) - 1);
     }
-
-    strncpy(_name, name, sizeof(_name));
 
     if (0x00 != _netmgmt_ioctl(IOCTRL_NET_SET_DEV_DEFAULT, &_name[0])) {
         printf("[hal_netmgmt]: %s failed\n", __FUNCTION__);
@@ -710,6 +735,14 @@ int netmgmt_utils_set_defeault_dev(char name[32])
 
     return 0;
 }
+
+extern __typeof(netmgmt_utils_get_default_dev)
+    netmgmt_utils_get_defeault_dev
+    __attribute__((alias("netmgmt_utils_get_default_dev")));
+
+extern __typeof(netmgmt_utils_set_default_dev)
+    netmgmt_utils_set_defeault_dev
+    __attribute__((alias("netmgmt_utils_set_default_dev")));
 
 int netmgmt_utils_get_dev_list(int* dev_num, char names[NET_DEV_MAX_CNT][32])
 {
@@ -753,6 +786,23 @@ int netmgmt_utils_probe_device(enum rt_netif_t itf, int* status)
         *status = _itf;
     }
 
+    return 0;
+}
+
+int netmgmt_utils_get_netdev_name(enum rt_netif_t itf, char name[32])
+{
+    struct netdev_name_cmd command;
+
+    if (!name) {
+        return -1;
+    }
+    memset(&command, 0, sizeof(command));
+    command.itf = itf;
+    if (0x00 != _netmgmt_ioctl(IOCTRL_NET_GET_DEV_NAME, &command)) {
+        return -1;
+    }
+    memcpy(name, command.name, sizeof(command.name));
+    name[sizeof(command.name) - 1] = '\0';
     return 0;
 }
 
