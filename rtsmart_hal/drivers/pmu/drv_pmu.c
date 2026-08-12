@@ -68,7 +68,13 @@ struct drv_pmu_power_cycle_cfg {
 };
 
 struct drv_pmu_wakeup_pad_level {
+    uint32_t pad;
     int32_t level;
+};
+
+#define DRV_PMU_WAKEUP_SOURCE_NAME_MAX 64U
+struct drv_pmu_wakeup_source {
+    char name[DRV_PMU_WAKEUP_SOURCE_NAME_MAX];
 };
 
 #define PMU_IOCTL_REGISTER_NOTIFY \
@@ -86,7 +92,9 @@ struct drv_pmu_wakeup_pad_level {
 #define PMU_IOCTL_SHUTDOWN_NOW \
     _IO('P', 0x06)
 #define PMU_IOCTL_GET_WAKEUP_PAD_LEVEL \
-    _IOR('P', 0x07, struct drv_pmu_wakeup_pad_level)
+    _IOWR('P', 0x07, struct drv_pmu_wakeup_pad_level)
+#define PMU_IOCTL_GET_WAKEUP_SOURCE \
+    _IOR('P', 0x08, struct drv_pmu_wakeup_source)
 
 struct drv_pmu_inst {
     int fd;
@@ -336,6 +344,12 @@ int drv_pmu_rtc_schedule_power_cycle(drv_pmu_inst_t *inst,
         .reserved = 0,
     };
 
+    if ((shutdown_after_s < DRV_PMU_POWER_CYCLE_MIN_DELAY_S) ||
+        (poweron_after_s < DRV_PMU_POWER_CYCLE_MIN_DELAY_S)) {
+        errno = EINVAL;
+        return -1;
+    }
+
     return drv_pmu_ioctl(inst, PMU_IOCTL_SCHEDULE_POWER_CYCLE, &cfg,
                  "[hal_pmu] ioctl(SCHEDULE_POWER_CYCLE)");
 }
@@ -352,7 +366,7 @@ int drv_pmu_shutdown_now(drv_pmu_inst_t *inst)
                  "[hal_pmu] ioctl(SHUTDOWN_NOW)");
 }
 
-int drv_pmu_wakeup_pad_get_level(drv_pmu_inst_t *inst, int *level)
+int drv_pmu_wakeup_pad_get_level(drv_pmu_inst_t *inst, uint32_t pad, int *level)
 {
     struct drv_pmu_wakeup_pad_level result;
 
@@ -362,6 +376,7 @@ int drv_pmu_wakeup_pad_get_level(drv_pmu_inst_t *inst, int *level)
     }
 
     memset(&result, 0, sizeof(result));
+    result.pad = pad;
     if (drv_pmu_ioctl(inst, PMU_IOCTL_GET_WAKEUP_PAD_LEVEL, &result,
               "[hal_pmu] ioctl(GET_WAKEUP_PAD_LEVEL)") < 0)
         return -1;
@@ -372,5 +387,28 @@ int drv_pmu_wakeup_pad_get_level(drv_pmu_inst_t *inst, int *level)
     }
 
     *level = result.level;
+    return 0;
+}
+
+int drv_pmu_wakeup_source_get(drv_pmu_inst_t *inst, char *name,
+                              size_t name_size)
+{
+    struct drv_pmu_wakeup_source result;
+
+    if ((name == NULL) || (name_size == 0U)) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (name_size > sizeof(result.name))
+        name_size = sizeof(result.name);
+    memset(&result, 0, sizeof(result));
+    if (drv_pmu_ioctl(inst, PMU_IOCTL_GET_WAKEUP_SOURCE, &result,
+              "[hal_pmu] ioctl(GET_WAKEUP_SOURCE)") < 0)
+        return -1;
+    if (strnlen(result.name, sizeof(result.name)) >= name_size) {
+        errno = ENOSPC;
+        return -1;
+    }
+    memcpy(name, result.name, strnlen(result.name, sizeof(result.name)) + 1U);
     return 0;
 }

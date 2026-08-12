@@ -25,12 +25,16 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct drv_pmu_inst drv_pmu_inst_t;
+
+/* RTC alarm programming needs at least two seconds of lead time. */
+#define DRV_PMU_POWER_CYCLE_MIN_DELAY_S 2U
 
 int drv_pmu_inst_create(drv_pmu_inst_t **inst);
 void drv_pmu_inst_destroy(drv_pmu_inst_t **inst);
@@ -46,7 +50,10 @@ int drv_pmu_key_confirm_shutdown(drv_pmu_inst_t *inst);
 int drv_pmu_shutdown_now(drv_pmu_inst_t *inst);
 
 /* Read the current level of the configured shutdown wakeup pad. */
-int drv_pmu_wakeup_pad_get_level(drv_pmu_inst_t *inst, int *level);
+int drv_pmu_wakeup_pad_get_level(drv_pmu_inst_t *inst, uint32_t pad,
+                                 int *level);
+int drv_pmu_wakeup_source_get(drv_pmu_inst_t *inst, char *name,
+                              size_t name_size);
 
 /*
  * Schedule shutdown after shutdown_after_s seconds, then power on after
