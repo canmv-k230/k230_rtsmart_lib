@@ -133,8 +133,8 @@ NRSYS(socket)
 NRSYS(closesocket)
 NRSYS(getaddrinfo)
 NRSYS(gethostbyname2_r) /* 85 */
-NRSYS(network_resv0)
-NRSYS(network_resv1)
+NRSYS(sendmsg)
+NRSYS(recvmsg)
 NRSYS(network_resv2)
 NRSYS(network_resv3)
 NRSYS(network_resv4)    /* 90 */
