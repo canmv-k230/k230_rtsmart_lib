@@ -261,24 +261,24 @@ int drv_i2c_transfer(drv_i2c_inst_t* inst, i2c_msg_t* msgs, int msg_cnt)
 
 // static const drv_i2c_pin_cfg_t drv_i2c_dft_pins[KD_HARD_I2C_MAX_NUM] = {
 //     {
-//         .pin_scl = CONFIG_RT_SMART_HAL_DRV_I2C0_PIN_SCL_DFT,
-//         .pin_sda = CONFIG_RT_SMART_HAL_DRV_I2C0_PIN_SDA_DFT,
+//         .pin_scl = CONFIG_RTSMART_HAL_DRV_I2C0_PIN_SCL_DFT,
+//         .pin_sda = CONFIG_RTSMART_HAL_DRV_I2C0_PIN_SDA_DFT,
 //     },
 //     {
-//         .pin_scl = CONFIG_RT_SMART_HAL_DRV_I2C1_PIN_SCL_DFT,
-//         .pin_sda = CONFIG_RT_SMART_HAL_DRV_I2C1_PIN_SDA_DFT,
+//         .pin_scl = CONFIG_RTSMART_HAL_DRV_I2C1_PIN_SCL_DFT,
+//         .pin_sda = CONFIG_RTSMART_HAL_DRV_I2C1_PIN_SDA_DFT,
 //     },
 //     {
-//         .pin_scl = CONFIG_RT_SMART_HAL_DRV_I2C2_PIN_SCL_DFT,
-//         .pin_sda = CONFIG_RT_SMART_HAL_DRV_I2C2_PIN_SDA_DFT,
+//         .pin_scl = CONFIG_RTSMART_HAL_DRV_I2C2_PIN_SCL_DFT,
+//         .pin_sda = CONFIG_RTSMART_HAL_DRV_I2C2_PIN_SDA_DFT,
 //     },
 //     {
-//         .pin_scl = CONFIG_RT_SMART_HAL_DRV_I2C3_PIN_SCL_DFT,
-//         .pin_sda = CONFIG_RT_SMART_HAL_DRV_I2C3_PIN_SDA_DFT,
+//         .pin_scl = CONFIG_RTSMART_HAL_DRV_I2C3_PIN_SCL_DFT,
+//         .pin_sda = CONFIG_RTSMART_HAL_DRV_I2C3_PIN_SDA_DFT,
 //     },
 //     {
-//         .pin_scl = CONFIG_RT_SMART_HAL_DRV_I2C4_PIN_SCL_DFT,
-//         .pin_sda = CONFIG_RT_SMART_HAL_DRV_I2C4_PIN_SDA_DFT,
+//         .pin_scl = CONFIG_RTSMART_HAL_DRV_I2C4_PIN_SCL_DFT,
+//         .pin_sda = CONFIG_RTSMART_HAL_DRV_I2C4_PIN_SDA_DFT,
 //     },
 // };
 

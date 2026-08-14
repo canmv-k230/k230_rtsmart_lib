@@ -1,47 +1,47 @@
 menu "RT-Smart Userspace Hal Drivers Configuration"
 
-    menuconfig RT_SMART_HAL_DRV_I2C_DFT_PINS
+    menuconfig RTSMART_HAL_DRV_I2C_DFT_PINS
         bool "I2C Default Pins Configuration"
         default n
 
-        if RT_SMART_HAL_DRV_I2C_DFT_PINS
+        if RTSMART_HAL_DRV_I2C_DFT_PINS
             comment "I2C0 Pin Configurations"
-            config RT_SMART_HAL_DRV_I2C0_PIN_SCL_DFT
+            config RTSMART_HAL_DRV_I2C0_PIN_SCL_DFT
                 int "I2C0 Default Pin SCL"
                 default 48
-            config RT_SMART_HAL_DRV_I2C0_PIN_SDA_DFT
+            config RTSMART_HAL_DRV_I2C0_PIN_SDA_DFT
                 int "I2C0 Default Pin SDA"
                 default 49
 
             comment "I2C1 Pin Configurations"
-            config RT_SMART_HAL_DRV_I2C1_PIN_SCL_DFT
+            config RTSMART_HAL_DRV_I2C1_PIN_SCL_DFT
                 int "I2C1 Default Pin SCL"
                 default 40
-            config RT_SMART_HAL_DRV_I2C1_PIN_SDA_DFT
+            config RTSMART_HAL_DRV_I2C1_PIN_SDA_DFT
                 int "I2C1 Default Pin SDA"
                 default 41
 
             comment "I2C2 Pin Configurations"
-            config RT_SMART_HAL_DRV_I2C2_PIN_SCL_DFT
+            config RTSMART_HAL_DRV_I2C2_PIN_SCL_DFT
                 int "I2C2 Default Pin SCL"
                 default 11
-            config RT_SMART_HAL_DRV_I2C2_PIN_SDA_DFT
+            config RTSMART_HAL_DRV_I2C2_PIN_SDA_DFT
                 int "I2C2 Default Pin SDA"
                 default 12
 
             comment "I2C3 Pin Configurations"
-            config RT_SMART_HAL_DRV_I2C3_PIN_SCL_DFT
+            config RTSMART_HAL_DRV_I2C3_PIN_SCL_DFT
                 int "I2C3 Default Pin SCL"
                 default 36
-            config RT_SMART_HAL_DRV_I2C3_PIN_SDA_DFT
+            config RTSMART_HAL_DRV_I2C3_PIN_SDA_DFT
                 int "I2C3 Default Pin SDA"
                 default 37
 
             comment "I2C4 Pin Configurations"
-            config RT_SMART_HAL_DRV_I2C4_PIN_SCL_DFT
+            config RTSMART_HAL_DRV_I2C4_PIN_SCL_DFT
                 int "I2C4 Default Pin SCL"
                 default 7
-            config RT_SMART_HAL_DRV_I2C4_PIN_SDA_DFT
+            config RTSMART_HAL_DRV_I2C4_PIN_SDA_DFT
                 int "I2C4 Default Pin SDA"
                 default 8
 
