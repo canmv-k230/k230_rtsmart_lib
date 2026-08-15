@@ -3,7 +3,7 @@ include mkenv.mk
 subdirs-y := 
 
 ifndef RTT_LIBS_DISABLED
-subdirs-y += rtsmart_hal 3rd-party
+subdirs-y += rtsmart_hal 3rd-party wlan_offload
 endif
 
 .PHONY: all clean distclean
