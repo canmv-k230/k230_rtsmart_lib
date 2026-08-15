@@ -24,11 +24,15 @@
  */
 #include "lv_k230_display.h"
 
+#include "lv_k230_image_convert.h"
+
 #include "k_gsdma_comm.h"
 #include "k_type.h"
+#include "lv_k230_vglite.h"
 #include "lvgl.h"
 
 #include "hal_utils.h"
+#include "canmv_misc.h"
 
 #include "mpi_gsdma_api.h"
 #include "mpi_sys_api.h"
@@ -37,6 +41,10 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+
+#ifndef LV_K230_DISPLAY_PRINT_FLUSH_FPS
+#define LV_K230_DISPLAY_PRINT_FLUSH_FPS 1
+#endif
 
 typedef struct {
     void*              buffer_addr;
@@ -54,9 +62,12 @@ typedef struct {
     int                      buffer_count; /* buffer for lvgl count */
     k_u32                    buffer_pool_id; /* buffer pool id */
     lv_k230_display_buffer_t buffer[2]; /* for lvgl use */
+    bool                     buffer_cached;
 
     lv_display_t* lv_disp;
 } lv_k230_display_intstance_t;
+
+static uint32_t s_display_count;
 
 static k_u8 lv_k230_map_color_format_to_pixel_size(lv_color_format_t color_format)
 {
@@ -90,6 +101,8 @@ static k_pixel_format lv_k230_map_color_format_to_pixel_format(lv_color_format_t
         return PIXEL_FORMAT_BGR_888;
     case LV_COLOR_FORMAT_ARGB8888:
     case LV_COLOR_FORMAT_XRGB8888:
+        /* LVGL stores 32-bit color as B, G, R, A in memory, which is
+         * PIXEL_FORMAT_ARGB_8888 on this little-endian VO interface. */
         return PIXEL_FORMAT_ARGB_8888;
     default:
         printf("%s Unsupported color format %d\n", __func__, color_format);
@@ -130,7 +143,8 @@ static int k230_display_allocate_single_buffer(lv_k230_display_intstance_t* inst
 
     buffer->buffer_size                  = buffer_size;
     buffer->vf_info.v_frame.phys_addr[0] = kd_mpi_vb_handle_to_phyaddr(buffer->block_handle);
-    buffer->buffer_addr                  = kd_mpi_sys_mmap_cached(buffer->vf_info.v_frame.phys_addr[0], buffer_size);
+    buffer->buffer_addr = inst->buffer_cached ? kd_mpi_sys_mmap_cached(buffer->vf_info.v_frame.phys_addr[0], buffer_size)
+                                              : kd_mpi_sys_mmap(buffer->vf_info.v_frame.phys_addr[0], buffer_size);
 
     if (!buffer->buffer_addr) {
         printf("Mmap failed\n");
@@ -138,6 +152,14 @@ static int k230_display_allocate_single_buffer(lv_k230_display_intstance_t* inst
         buffer->block_handle = VB_INVALID_HANDLE;
         return -1;
     }
+
+    memset(buffer->buffer_addr, 0, buffer_size);
+    if (inst->buffer_cached) {
+        kd_mpi_sys_mmz_flush_cache(buffer->vf_info.v_frame.phys_addr[0], buffer->buffer_addr, buffer_size);
+    }
+
+    lv_k230_vglite_register_buffer(buffer->buffer_addr, buffer->vf_info.v_frame.phys_addr[0], buffer_size,
+                                      inst->buffer_cached);
 
     return 0;
 }
@@ -156,9 +178,12 @@ static void k230_display_setup_frame_info(lv_k230_display_intstance_t* inst, lv_
     buffer->vf_info.pool_id              = inst->buffer_pool_id;
     buffer->vf_info.v_frame.width        = layer_width;
     buffer->vf_info.v_frame.height       = layer_height;
-    buffer->vf_info.v_frame.stride[0]    = layer_width * pixel_bpp;
+    buffer->vf_info.v_frame.stride[0]    = lv_draw_buf_width_to_stride(layer_width, inst->color_format);
+    if (buffer->vf_info.v_frame.stride[0] == 0) {
+        buffer->vf_info.v_frame.stride[0] = layer_width * pixel_bpp;
+    }
     buffer->vf_info.v_frame.pixel_format = pixel_fmt;
-    buffer->data_size                    = layer_width * layer_height * pixel_bpp;
+    buffer->data_size                    = buffer->vf_info.v_frame.stride[0] * layer_height;
 }
 
 /* The rest of the functions remain the same... */
@@ -173,6 +198,7 @@ static void k230_display_buffer_deinit(lv_k230_display_intstance_t* inst)
     // Release LVGL buffers
     for (i = 0; i < inst->buffer_count; i++) {
         if (inst->buffer[i].buffer_addr) {
+            lv_k230_vglite_unregister_buffer(inst->buffer[i].buffer_addr);
             kd_mpi_sys_munmap(inst->buffer[i].buffer_addr, inst->buffer[i].buffer_size);
             inst->buffer[i].buffer_addr = NULL;
         }
@@ -204,6 +230,7 @@ static int k230_display_configure_buffers(lv_k230_display_intstance_t* inst)
 
     k_u8  pixel_fmt_bpp;
     k_u32 layer_width, layer_height;
+    k_u32 draw_stride;
 
     k_gdma_rotation_e layer_rotate;
 
@@ -217,10 +244,14 @@ static int k230_display_configure_buffers(lv_k230_display_intstance_t* inst)
     layer_height = inst->osd_layer_attr.img_size.height;
     layer_rotate = inst->osd_layer_attr.func;
 
-    pixel_fmt_bpp = lv_k230_map_color_format_to_pixel_size(LV_COLOR_FORMAT_NATIVE);
+    pixel_fmt_bpp = lv_k230_map_color_format_to_pixel_size(inst->color_format);
 
     // Calculate buffer size and stride
-    buffer_size = layer_width * layer_height * pixel_fmt_bpp;
+    draw_stride = lv_draw_buf_width_to_stride(layer_width, inst->color_format);
+    if (draw_stride == 0) {
+        draw_stride = layer_width * pixel_fmt_bpp;
+    }
+    buffer_size = draw_stride * layer_height;
     if (buffer_size == 0) {
         return -1;
     }
@@ -230,8 +261,11 @@ static int k230_display_configure_buffers(lv_k230_display_intstance_t* inst)
         k230_display_buffer_deinit(inst);
     }
 
+    inst->buffer_cached = LV_USE_DRAW_VG_LITE ? false : true;
+
     // Create VB pool for display buffers
-    inst->buffer_pool_id = kd_mpi_vb_create_pool_ex(buffer_size, inst->buffer_count, VB_REMAP_MODE_CACHED);
+    k_vb_remap_mode remap_mode = inst->buffer_cached ? VB_REMAP_MODE_CACHED : VB_REMAP_MODE_NOCACHE;
+    inst->buffer_pool_id = kd_mpi_vb_create_pool_ex(buffer_size, inst->buffer_count, remap_mode);
     if (inst->buffer_pool_id == VB_INVALID_POOLID) {
         printf("Failed to create VB pool for display\n");
         return -1;
@@ -245,8 +279,11 @@ static int k230_display_configure_buffers(lv_k230_display_intstance_t* inst)
             printf("Failed to allocate buffer %d\n", i);
             // Clean up previously allocated buffers
             for (int j = 0; j < i; j++) {
+                lv_k230_vglite_unregister_buffer(inst->buffer[j].buffer_addr);
                 kd_mpi_sys_munmap(inst->buffer[j].buffer_addr, buffer_size);
                 kd_mpi_vb_release_block(inst->buffer[j].block_handle);
+                inst->buffer[j].buffer_addr = NULL;
+                inst->buffer[j].block_handle = VB_INVALID_HANDLE;
             }
             kd_mpi_vb_destory_pool(inst->buffer_pool_id);
             inst->buffer_pool_id = VB_INVALID_POOLID;
@@ -314,6 +351,12 @@ static inline lv_k230_display_buffer_t* find_buffer_by_color_p(lv_k230_display_i
 
 static void flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* color_p)
 {
+#if LV_K230_DISPLAY_PRINT_FLUSH_FPS
+    static int frame_count = 0;
+    static uint64_t last_ticks_ms = 0;
+    uint64_t delta, current_ticks_ms;
+#endif
+
     lv_k230_display_intstance_t* inst = lv_display_get_driver_data(disp);
 
     if (!inst) {
@@ -330,12 +373,48 @@ static void flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* color_p
         return;
     }
 
-    kd_mpi_sys_mmz_flush_cache(current_buffer->vf_info.v_frame.phys_addr[0], current_buffer->buffer_addr,
-                               current_buffer->data_size);
+    if (inst->buffer_cached) {
+        kd_mpi_sys_mmz_flush_cache(current_buffer->vf_info.v_frame.phys_addr[0], current_buffer->buffer_addr,
+                                   current_buffer->data_size);
+    }
 
-    kd_display_layer_push_frame(inst->osd_layer_attr.layer_id, &current_buffer->vf_info);
+    /*
+     * LVGL's draw dispatcher normally drains VG-Lite when it becomes idle.
+     * Keep the display boundary explicit as well: VO may latch this buffer at
+     * the next refresh immediately after insert_frame returns.
+     */
+    if (!lv_k230_vglite_wait_idle()) {
+        lv_display_flush_ready(disp);
+        return;
+    }
+
+    if (kd_display_layer_push_frame(inst->osd_layer_attr.layer_id, &current_buffer->vf_info) != K_SUCCESS) {
+        printf("Display push frame failed\n");
+    }
 
     lv_display_flush_ready(disp);
+
+#if LV_K230_DISPLAY_PRINT_FLUSH_FPS
+    current_ticks_ms = utils_cpu_ticks_ms();
+    if (last_ticks_ms == 0) {
+        last_ticks_ms = current_ticks_ms;
+    }
+    delta = current_ticks_ms - last_ticks_ms;
+
+    frame_count++;
+
+    if (delta >= 1000) { // Update every 1000ms (1 second)
+        float elapsed_sec = delta / 1000.0f;
+        float avg_fps     = (float)frame_count / elapsed_sec;
+        int cpu_usage = 0;
+
+        canmv_misc_get_cpu_usage(&cpu_usage);
+        printf("lvgl refresh rate: %.1f fps, cpu: %d\n", avg_fps, cpu_usage);
+
+        frame_count   = 0;
+        last_ticks_ms = current_ticks_ms;
+    }
+#endif
 }
 
 static void event_cb(lv_event_t* e)
@@ -355,6 +434,12 @@ static void event_cb(lv_event_t* e)
 
             lv_display_set_driver_data(display, NULL);
             lv_free(inst);
+            if(s_display_count > 0) {
+                s_display_count--;
+            }
+            if(s_display_count == 0) {
+                lv_k230_image_convert_deinit();
+            }
         }
         break;
     case LV_EVENT_RESOLUTION_CHANGED:
@@ -441,8 +526,16 @@ static void event_cb(lv_event_t* e)
             }
 
             // If format is the same, no need to reconfigure
-            if ((new_color_format == inst->color_format) || (new_pixel_format == old_pixel_format)) {
+            if (new_color_format == inst->color_format) {
                 printf("Color format unchanged, skipping reconfiguration\n");
+                break;
+            }
+
+            if (new_pixel_format == old_pixel_format) {
+                inst->color_format = new_color_format;
+                for (int i = 0; i < inst->buffer_count; i++) {
+                    k230_display_setup_frame_info(inst, &inst->buffer[i]);
+                }
                 break;
             }
 
@@ -550,8 +643,6 @@ lv_display_t* lv_k230_display_create(k_vo_layer_id layer, uint8_t alpha)
     lv_display_set_driver_data(disp, inst);
 
     lv_display_set_flush_cb(disp, flush_cb);
-    lv_display_set_buffers(disp, inst->buffer[0].buffer_addr, inst->buffer[1].buffer_addr, inst->buffer[0].buffer_size,
-                           LV_DISPLAY_RENDER_MODE_DIRECT);
 
     lv_display_add_event_cb(disp, event_cb, LV_EVENT_RESOLUTION_CHANGED, NULL);
     lv_display_add_event_cb(disp, event_cb, LV_EVENT_COLOR_FORMAT_CHANGED, NULL);
@@ -559,6 +650,7 @@ lv_display_t* lv_k230_display_create(k_vo_layer_id layer, uint8_t alpha)
 
     lv_tick_set_cb(tick_get_cb);
 
+    s_display_count++;
     return disp;
 
 _failed_osd_init:

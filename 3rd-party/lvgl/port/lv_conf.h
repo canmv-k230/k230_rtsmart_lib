@@ -28,6 +28,18 @@
 #define CONFIG_RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH 32
 #endif
 
+#ifndef CONFIG_RTSMART_3RD_PARTY_LVGL_USE_VGLITE
+#define CONFIG_RTSMART_3RD_PARTY_LVGL_USE_VGLITE 0
+#endif
+
+#ifndef CONFIG_RTSMART_3RD_PARTY_LVGL_VGLITE_TESS_WIDTH
+#define CONFIG_RTSMART_3RD_PARTY_LVGL_VGLITE_TESS_WIDTH 1920
+#endif
+
+#ifndef CONFIG_RTSMART_3RD_PARTY_LVGL_VGLITE_TESS_HEIGHT
+#define CONFIG_RTSMART_3RD_PARTY_LVGL_VGLITE_TESS_HEIGHT 1080
+#endif
+
 /*====================
    COLOR SETTINGS
  *====================*/
@@ -94,7 +106,7 @@
  *====================*/
 
 /** Default display refresh, input device read and animation step period. */
-#define LV_DEF_REFR_PERIOD  33      /**< [ms] */
+#define LV_DEF_REFR_PERIOD  16      /**< [ms] */
 
 /** Default Dots Per Inch. Used to initialize default sizes such as widgets sized, style paddings.
  * (Not so important, you can adjust it to modify default sizes and spaces.) */
@@ -113,7 +125,13 @@
  * - LV_OS_MQX
  * - LV_OS_SDL2
  * - LV_OS_CUSTOM */
-#define LV_USE_OS   LV_OS_PTHREAD // LV_OS_NONE
+/* VG-Lite is a single-context backend. Keep its GPU and software fallback
+ * draw units on the same LVGL thread. */
+#if CONFIG_RTSMART_3RD_PARTY_LVGL_USE_VGLITE
+    #define LV_USE_OS LV_OS_NONE
+#else
+    #define LV_USE_OS LV_OS_PTHREAD
+#endif
 
 #if LV_USE_OS == LV_OS_CUSTOM
     #define LV_OS_CUSTOM_INCLUDE <stdint.h>
@@ -141,7 +159,7 @@
  * Requirements:
  * - `LV_USE_MATRIX = 1`.
  * - Rendering engine needs to support 3x3 matrix transformations. */
-#define LV_DRAW_TRANSFORM_USE_MATRIX            0
+#define LV_DRAW_TRANSFORM_USE_MATRIX            1
 
 /* If a widget has `style_opa < 255` (not `bg_opa`, `text_opa` etc) or not NORMAL blend mode
  * it is buffered into a "simple" layer before rendering. The widget can be buffered in smaller chunks.
@@ -305,10 +323,10 @@
 #define LV_USE_DRAW_SDL 0
 
 /** Use VG-Lite GPU. */
-#define LV_USE_DRAW_VG_LITE 0
+#define LV_USE_DRAW_VG_LITE CONFIG_RTSMART_3RD_PARTY_LVGL_USE_VGLITE
 #if LV_USE_DRAW_VG_LITE
     /** Enable VG-Lite custom external 'gpu_init()' function */
-    #define LV_VG_LITE_USE_GPU_INIT 0
+    #define LV_VG_LITE_USE_GPU_INIT 1
 
     /** Enable VG-Lite assert. */
     #define LV_VG_LITE_USE_ASSERT 0
@@ -592,11 +610,11 @@
 #define LV_ATTRIBUTE_EXTERN_DATA
 
 /** Use `float` as `lv_value_precise_t` */
-#define LV_USE_FLOAT            0
+#define LV_USE_FLOAT            1
 
 /** Enable matrix support
  *  - Requires `LV_USE_FLOAT = 1` */
-#define LV_USE_MATRIX           0
+#define LV_USE_MATRIX           1
 
 /** Include `lvgl_private.h` in `lvgl.h` to access internal data and functions by default */
 #ifndef LV_USE_PRIVATE_API

@@ -2,6 +2,8 @@ include ../../mkenv.mk
 
 subdirs-y := canmv_misc netmgmt k230_syscalls k230_ota
 
+subdirs-$(CONFIG_RTSMART_HAL_ENABLE_VG_LITE) += vg_lite
+
 .PHONY: all clean distclean
 
 all: $(subdirs-y)

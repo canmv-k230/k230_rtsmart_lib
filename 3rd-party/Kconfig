@@ -41,6 +41,25 @@ menu "RT-Smart 3rd-party Configuration"
             default 24 if RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH_24
             default 32 if RTSMART_3RD_PARTY_LVGL_COLOR_DEPTH_32
 
+            config RTSMART_3RD_PARTY_LVGL_USE_VGLITE
+                bool "Enable LVGL VG-Lite renderer"
+                default y
+                select RTSMART_HAL_ENABLE_VG_LITE
+                help
+                    Use LVGL's complete VG-Lite draw backend for supported fill,
+                    border, shadow, text, image, arc, line, layer, triangle and
+                    mask tasks. The software renderer remains as fallback.
+
+            config RTSMART_3RD_PARTY_LVGL_VGLITE_TESS_WIDTH
+                int "LVGL VG-Lite tessellation width"
+                default 1920
+                depends on RTSMART_3RD_PARTY_LVGL_USE_VGLITE
+
+            config RTSMART_3RD_PARTY_LVGL_VGLITE_TESS_HEIGHT
+                int "LVGL VG-Lite tessellation height"
+                default 1080
+                depends on RTSMART_3RD_PARTY_LVGL_USE_VGLITE
+
             config RTSMART_3RD_PARTY_ENABLE_LVGL_EXAMPLES
                 bool "Enable LVGL Examples"
                 default n

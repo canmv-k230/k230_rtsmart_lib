@@ -11,6 +11,7 @@ DIR = $(shell basename `pwd`)
 LOCAL_SRC_DIR = $(shell pwd)
 LIB = $(RTSMART_3RD_PARTY_LIB_INSTALL_PATH)/liblvgl.a
 BUILD =  $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/lvgl/
+CONFIG_DEPS := $(SDK_SRC_ROOT_DIR)/.config $(SDK_SRC_ROOT_DIR)/include/generated/autoconf.h
 
 SRC_DIRS := port 
 
@@ -64,15 +65,16 @@ OBJ_DIRS := $(sort $(dir $(OBJS) $(LIB)))
 all: $(LIB)
 	@$(ECHO) [BUILD] libs 3rd-party $(DIR) done.
 
-$(LIB): $(OBJS) | $(OBJ_DIRS)
+$(LIB): $(OBJS) $(CONFIG_DEPS) | $(OBJ_DIRS)
 	@echo [LD] $@
-	$(Q)$(AR) rcs $@ $^
+	$(Q)$(RM) $@
+	$(Q)$(AR) rcs $@ $(OBJS)
 
-$(COBJS) : $(BUILD)/%.o : %.c | $(OBJ_DIRS)
+$(COBJS) : $(BUILD)/%.o : %.c $(CONFIG_DEPS) | $(OBJ_DIRS)
 	@echo [CC] $<
 	$(Q)$(CC) $(CFLAGS) -MD -MP -MF $@.d -c $< -o $@
 
-$(CXXOBJS) : $(BUILD)/%.o : %.cpp | $(OBJ_DIRS)
+$(CXXOBJS) : $(BUILD)/%.o : %.cpp $(CONFIG_DEPS) | $(OBJ_DIRS)
 	@echo [CXX] $<
 	$(Q)$(CXX) $(CXXFLAGS) -MD -MP -MF $@.d -c $< -o $@
 

@@ -1,3 +1,7 @@
 menu "RT-Smart Userspace Hal Components Configuration"
 
+    config RTSMART_HAL_ENABLE_VG_LITE
+        bool "Enable VG-Lite userspace HAL"
+        default y
+
 endmenu
