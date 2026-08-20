@@ -418,25 +418,45 @@ bool lv_vg_lite_port_draw_buf_is_gpu_accessible(const lv_draw_buf_t * draw_buf)
     return lv_vg_lite_port_get_buffer_addr(draw_buf->data, draw_buf->data_size, &address);
 }
 
-void lv_vg_lite_port_map_buffer(vg_lite_buffer_t * buffer)
+bool lv_vg_lite_port_map_buffer(vg_lite_buffer_t * buffer)
 {
     if(!buffer || !buffer->memory || buffer->stride <= 0 || buffer->height <= 0) {
-        return;
+        return false;
     }
 
     uint64_t bytes64 = (uint64_t)(uint32_t)buffer->stride * (uint32_t)buffer->height;
-    if(bytes64 == 0 || bytes64 > SIZE_MAX) {
-        return;
+    if(bytes64 == 0 || bytes64 > UINT32_MAX) {
+        return false;
     }
 
+    bool mapped = false;
+    bool registered = false;
     pthread_mutex_lock(&s_lock);
     size_t offset;
     lv_k230_vglite_buffer_node_t * node = find_node_locked(buffer->memory, (size_t)bytes64, &offset);
+    registered = node != NULL;
     if(node && map_node_locked(node) && offset <= UINT32_MAX - node->vg_address) {
         buffer->handle = node->vg_handle;
         buffer->address = node->vg_address + (uint32_t)offset;
+        mapped = true;
     }
     pthread_mutex_unlock(&s_lock);
+
+    if(mapped || registered) {
+        return mapped;
+    }
+
+    uintptr_t address;
+    if(!lv_vg_lite_port_get_buffer_addr(buffer->memory, (uint32_t)bytes64, &address) ||
+       address > UINT32_MAX) {
+        return false;
+    }
+
+    /* This descriptor is transient, so there is no owner that could unmap a
+     * handle. Rendering supports a physical address without a handle. */
+    buffer->handle = NULL;
+    buffer->address = (uint32_t)address;
+    return true;
 }
 
 static bool cache_operation(const void * ptr, uint32_t size, bool invalidate)
@@ -611,11 +631,13 @@ void lv_vg_lite_port_init_draw_buf_handlers(void)
     init_draw_buf_handlers();
 }
 
-void gpu_init(void)
+bool gpu_init(void)
 {
     if(s_gpu_inited) {
-        return;
+        return true;
     }
+
+    init_draw_buf_handlers();
 
     vg_lite_error_t err = vg_lite_init(CONFIG_RTSMART_3RD_PARTY_LVGL_VGLITE_TESS_WIDTH,
                                        CONFIG_RTSMART_3RD_PARTY_LVGL_VGLITE_TESS_HEIGHT);
@@ -628,6 +650,8 @@ void gpu_init(void)
     else {
         printf("LVGL VG-Lite init failed: %d\n", (int)err);
     }
+
+    return s_gpu_inited;
 }
 
 bool lv_k230_vglite_wait_idle(void)

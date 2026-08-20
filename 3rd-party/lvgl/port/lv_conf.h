@@ -328,6 +328,12 @@
     /** Enable VG-Lite custom external 'gpu_init()' function */
     #define LV_VG_LITE_USE_GPU_INIT 1
 
+    /** Let the K230 init hook reject the VG-Lite draw unit on hardware failure. */
+    #define LV_VG_LITE_GPU_INIT_HAS_RESULT 1
+
+    /** Translate RT-Smart virtual buffer addresses to GPU physical addresses. */
+    #define LV_VG_LITE_USE_BUFFER_MAP_HOOK 1
+
     /** Enable VG-Lite assert. */
     #define LV_VG_LITE_USE_ASSERT 0
 
