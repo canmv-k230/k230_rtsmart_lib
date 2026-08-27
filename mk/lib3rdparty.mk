@@ -20,7 +20,10 @@ else
 LIB_CFLAGS += -include $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include/nimble/nimble_port_config.h
 endif
 
-ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_LIBPEER),y)
+RTSMART_LINK_LIBPEER ?= $(CONFIG_RTSMART_3RD_PARTY_ENABLE_LIBPEER)
+ifneq ($(RTSMART_LINK_LIBPEER),y)
+lib3rd_party_libs := $(filter-out $(lib3rd_party_lib_dir)/libpeer.a,$(lib3rd_party_libs))
+else
 lib3rd_party_inc_dir += $(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include/libpeer
 libpeer_private_lib_dir := $(SDK_RTSMART_SRC_DIR)/libs/3rd-party/libpeer/3rd-party/lib
 libpeer_hal_lib_dir := $(SDK_RTSMART_BUILD_DIR)/libs/rtsmart_hal/lib
