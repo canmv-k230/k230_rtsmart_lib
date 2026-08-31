@@ -1,0 +1,207 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: RT-Smart Port <port@lvgl.invalid>
+Date: Mon, 31 Aug 2026 12:00:00 +0800
+Subject: [PATCH] vg_lite: add fallible init and buffer mapping hooks
+
+Allow a platform port to skip VG-Lite draw-unit registration when GPU
+initialization fails, and to translate CPU virtual buffer addresses before
+VG-Lite consumes them. Propagate mapping errors so an invalid hardware
+address is never submitted. Both hooks preserve the existing behavior by
+default.
+
+---
+ src/draw/vg_lite/lv_draw_vg_lite.c       | 27 ++++++++++++++++++++++---
+ src/draw/vg_lite/lv_draw_vg_lite_label.c |  7 ++++--
+ src/draw/vg_lite/lv_vg_lite_utils.c      | 33 +++++++++++++++++++++++++-----
+ src/draw/vg_lite/lv_vg_lite_utils.h      |  4 ++--
+ 4 files changed, 57 insertions(+), 14 deletions(-)
+
+diff --git a/src/draw/vg_lite/lv_draw_vg_lite.c b/src/draw/vg_lite/lv_draw_vg_lite.c
+index a5f64197d..284eefea6 100644
+--- a/src/draw/vg_lite/lv_draw_vg_lite.c
++++ b/src/draw/vg_lite/lv_draw_vg_lite.c
+@@ -14,3 +14,7 @@
++#if LV_VG_LITE_USE_GPU_INIT
++#include "lv_k230_vglite_hooks.h"
++#endif
++
+ #include "../lv_draw_private.h"
+ #include "lv_draw_vg_lite_type.h"
+ #include "lv_vg_lite_path.h"
+@@ -56,10 +60,23 @@ static void draw_event_cb(lv_event_t * e);
+ void lv_draw_vg_lite_init(void)
+ {
+ #if LV_VG_LITE_USE_GPU_INIT
++#if defined(LV_VG_LITE_GPU_INIT_HAS_RESULT) && LV_VG_LITE_GPU_INIT_HAS_RESULT
++    static bool init_failed = false;
++    if(init_failed) {
++        return;
++    }
++#endif
+-    extern void gpu_init(void);
+     static bool inited = false;
+     if(!inited) {
++#if defined(LV_VG_LITE_GPU_INIT_HAS_RESULT) && LV_VG_LITE_GPU_INIT_HAS_RESULT
++        if(!gpu_init()) {
++            init_failed = true;
++            LV_LOG_ERROR("VG-Lite initialization failed; using software rendering");
++            return;
++        }
++#else
+         gpu_init();
++#endif
+         inited = true;
+     }
+ #endif
+@@ -122,8 +139,6 @@ static void draw_execute(lv_draw_vg_lite_unit_t * u)
+     /* remember draw unit for access to unit's context */
+     t->draw_unit = (lv_draw_unit_t *)u;
+ 
+-    lv_vg_lite_buffer_from_draw_buf(&u->target_buffer, layer->draw_buf);
+-
+     /* VG-Lite will output premultiplied image, set the flag correspondingly. */
+     lv_draw_buf_set_flag(layer->draw_buf, LV_IMAGE_FLAGS_PREMULTIPLIED);
+ 
+@@ -219,6 +234,12 @@ static int32_t draw_dispatch(lv_draw_unit_t * draw_unit, lv_layer_t * layer)
+         return LV_DRAW_UNIT_IDLE;
+     }
+ 
++    if(!lv_vg_lite_buffer_from_draw_buf(&u->target_buffer, layer->draw_buf)) {
++        t->preferred_draw_unit_id = LV_DRAW_UNIT_NONE;
++        t->preference_score = 100;
++        return LV_DRAW_UNIT_IDLE;
++    }
++
+     t->state = LV_DRAW_TASK_STATE_IN_PROGRESS;
+     u->task_act = t;
+ 
+diff --git a/src/draw/vg_lite/lv_draw_vg_lite_label.c b/src/draw/vg_lite/lv_draw_vg_lite_label.c
+index 398d7a6c4..124f44ee2 100644
+--- a/src/draw/vg_lite/lv_draw_vg_lite_label.c
++++ b/src/draw/vg_lite/lv_draw_vg_lite_label.c
+@@ -154,8 +154,7 @@ static inline bool init_buffer_from_glyph_dsc(vg_lite_buffer_t * buffer, lv_font
+         return false;
+     }
+ 
+-    lv_vg_lite_buffer_init(buffer, glyph_bitmap, g_dsc->box_w, g_dsc->box_h, g_dsc->stride, VG_LITE_A8, false);
+-    return true;
++    return lv_vg_lite_buffer_init(buffer, glyph_bitmap, g_dsc->box_w, g_dsc->box_h, g_dsc->stride, VG_LITE_A8, false);
+ }
+ 
+ static void draw_letter_cb(lv_draw_task_t * t, lv_draw_glyph_dsc_t * glyph_draw_dsc,
+@@ -181,7 +180,9 @@ static void draw_letter_cb(lv_draw_task_t * t, lv_draw_glyph_dsc_t * glyph_draw
+                             return;
+                         }
+ 
+-                        lv_vg_lite_buffer_from_draw_buf(&src_buf, glyph_draw_dsc->glyph_data);
++                        if(!lv_vg_lite_buffer_from_draw_buf(&src_buf, glyph_draw_dsc->glyph_data)) {
++                            return;
++                        }
+                     }
+ 
+                     draw_letter_bitmap(t, glyph_draw_dsc, &src_buf);
+diff --git a/src/draw/vg_lite/lv_vg_lite_utils.c b/src/draw/vg_lite/lv_vg_lite_utils.c
+index 62e6cfea5..edbb4bc4a 100644
+--- a/src/draw/vg_lite/lv_vg_lite_utils.c
++++ b/src/draw/vg_lite/lv_vg_lite_utils.c
+@@ -12,6 +12,10 @@
+ 
+ #if LV_USE_DRAW_VG_LITE
+ 
++#if defined(LV_VG_LITE_USE_BUFFER_MAP_HOOK) && LV_VG_LITE_USE_BUFFER_MAP_HOOK
++#include "lv_k230_vglite_hooks.h"
++#endif
++
+ #include "lv_vg_lite_decoder.h"
+ #include "lv_vg_lite_path.h"
+ #include "lv_vg_lite_pending.h"
+@@ -710,7 +714,7 @@ uint32_t lv_vg_lite_width_to_stride(uint32_t w, vg_lite_buffer_format_t color_fo
+     return LV_VG_LITE_ALIGN(((w * mul + div - 1) / div), align);
+ }
+ 
+-void lv_vg_lite_buffer_init(
++bool lv_vg_lite_buffer_init(
+     vg_lite_buffer_t * buffer,
+     const void * ptr,
+     int32_t width,
+@@ -771,9 +775,22 @@ void lv_vg_lite_buffer_init(
+         buffer->memory = (void *)ptr;
+         buffer->address = (uintptr_t)ptr;
+     }
++
++#if defined(LV_VG_LITE_USE_BUFFER_MAP_HOOK) && LV_VG_LITE_USE_BUFFER_MAP_HOOK
++    if(!lv_vg_lite_port_map_buffer(buffer)) {
++        buffer->handle = NULL;
++        buffer->address = 0;
++        buffer->yuv.uv_handle = NULL;
++        buffer->yuv.uv_planar = 0;
++        LV_LOG_ERROR("VG-Lite cannot map buffer %p", ptr);
++        return false;
++    }
++#endif
++
++    return true;
+ }
+ 
+-void lv_vg_lite_buffer_from_draw_buf(vg_lite_buffer_t * buffer, const lv_draw_buf_t * draw_buf)
++bool lv_vg_lite_buffer_from_draw_buf(vg_lite_buffer_t * buffer, const lv_draw_buf_t * draw_buf)
+ {
+     LV_ASSERT_NULL(buffer);
+     LV_ASSERT_NULL(draw_buf);
+@@ -791,9 +808,9 @@ void lv_vg_lite_buffer_from_draw_buf(vg_lite_buffer_t * buffer, const lv_draw_bu
+         ptr += LV_VG_LITE_ALIGN(palette_size_bytes, LV_DRAW_BUF_ALIGN);
+     }
+ 
+-    lv_vg_lite_buffer_init(buffer, ptr,
+-                           width, height, stride, format,
+-                           lv_draw_buf_has_flag(draw_buf, LV_VG_LITE_IMAGE_FLAGS_TILED));
++    return lv_vg_lite_buffer_init(buffer, ptr,
++                                  width, height, stride, format,
++                                  lv_draw_buf_has_flag(draw_buf, LV_VG_LITE_IMAGE_FLAGS_TILED));
+ }
+ 
+ void lv_vg_lite_image_matrix(vg_lite_matrix_t * matrix, int32_t x, int32_t y, const lv_draw_image_dsc_t * dsc)
+@@ -892,6 +909,11 @@ bool lv_vg_lite_buffer_open_image(vg_lite_buffer_t * buffer, lv_image_decoder_ds
+         return false;
+     }
+ 
++    if(!lv_vg_lite_buffer_from_draw_buf(buffer, decoded)) {
++        lv_image_decoder_close(decoder_dsc);
++        return false;
++    }
++
+     if(LV_COLOR_FORMAT_IS_INDEXED(decoded->header.cf)) {
+         uint32_t palette_size = LV_COLOR_INDEXED_PALETTE_SIZE(decoded->header.cf);
+         LV_PROFILER_DRAW_BEGIN_TAG("vg_lite_set_CLUT");
+@@ -899,7 +921,6 @@ bool lv_vg_lite_buffer_open_image(vg_lite_buffer_t * buffer, lv_image_decoder_ds
+         LV_PROFILER_DRAW_END_TAG("vg_lite_set_CLUT");
+     }
+ 
+-    lv_vg_lite_buffer_from_draw_buf(buffer, decoded);
+     return true;
+ }
+ 
+diff --git a/src/draw/vg_lite/lv_vg_lite_utils.h b/src/draw/vg_lite/lv_vg_lite_utils.h
+index 2b19d16a8..7d05b9ac3 100644
+--- a/src/draw/vg_lite/lv_vg_lite_utils.h
++++ b/src/draw/vg_lite/lv_vg_lite_utils.h
+@@ -118,7 +118,7 @@ void lv_vg_lite_buffer_format_bytes(
+ 
+ uint32_t lv_vg_lite_width_to_stride(uint32_t w, vg_lite_buffer_format_t color_format);
+ 
+-void lv_vg_lite_buffer_init(
++bool lv_vg_lite_buffer_init(
+     vg_lite_buffer_t * buffer,
+     const void * ptr,
+     int32_t width,
+@@ -127,7 +127,7 @@ void lv_vg_lite_buffer_init(
+     vg_lite_buffer_format_t format,
+     bool tiled);
+ 
+-void lv_vg_lite_buffer_from_draw_buf(vg_lite_buffer_t * buffer, const lv_draw_buf_t * draw_buf);
++bool lv_vg_lite_buffer_from_draw_buf(vg_lite_buffer_t * buffer, const lv_draw_buf_t * draw_buf);
+ 
+ void lv_vg_lite_image_matrix(vg_lite_matrix_t * matrix, int32_t x, int32_t y, const lv_draw_image_dsc_t * dsc);
+ 
+-- 
+2.50.1

@@ -18,6 +18,7 @@
 #include <pthread.h>
 
 #include "k_mmz_comm.h"
+#include "lv_k230_vglite_hooks.h"
 #include "mpi_sys_api.h"
 #include "src/draw/lv_draw_buf_private.h"
 #include "vg_lite.h"
@@ -418,14 +419,9 @@ bool lv_vg_lite_port_draw_buf_is_gpu_accessible(const lv_draw_buf_t * draw_buf)
     return lv_vg_lite_port_get_buffer_addr(draw_buf->data, draw_buf->data_size, &address);
 }
 
-bool lv_vg_lite_port_map_buffer(vg_lite_buffer_t * buffer)
+static bool map_buffer_plane(void * memory, uint32_t size, void ** handle, uint32_t * address)
 {
-    if(!buffer || !buffer->memory || buffer->stride <= 0 || buffer->height <= 0) {
-        return false;
-    }
-
-    uint64_t bytes64 = (uint64_t)(uint32_t)buffer->stride * (uint32_t)buffer->height;
-    if(bytes64 == 0 || bytes64 > UINT32_MAX) {
+    if(!memory || size == 0 || !handle || !address) {
         return false;
     }
 
@@ -433,11 +429,11 @@ bool lv_vg_lite_port_map_buffer(vg_lite_buffer_t * buffer)
     bool registered = false;
     pthread_mutex_lock(&s_lock);
     size_t offset;
-    lv_k230_vglite_buffer_node_t * node = find_node_locked(buffer->memory, (size_t)bytes64, &offset);
+    lv_k230_vglite_buffer_node_t * node = find_node_locked(memory, size, &offset);
     registered = node != NULL;
     if(node && map_node_locked(node) && offset <= UINT32_MAX - node->vg_address) {
-        buffer->handle = node->vg_handle;
-        buffer->address = node->vg_address + (uint32_t)offset;
+        *handle = node->vg_handle;
+        *address = node->vg_address + (uint32_t)offset;
         mapped = true;
     }
     pthread_mutex_unlock(&s_lock);
@@ -446,17 +442,51 @@ bool lv_vg_lite_port_map_buffer(vg_lite_buffer_t * buffer)
         return mapped;
     }
 
-    uintptr_t address;
-    if(!lv_vg_lite_port_get_buffer_addr(buffer->memory, (uint32_t)bytes64, &address) ||
-       address > UINT32_MAX) {
+    uintptr_t phys;
+    if(!lv_vg_lite_port_get_buffer_addr(memory, size, &phys) || phys > UINT32_MAX) {
         return false;
     }
 
     /* This descriptor is transient, so there is no owner that could unmap a
      * handle. Rendering supports a physical address without a handle. */
-    buffer->handle = NULL;
-    buffer->address = (uint32_t)address;
+    *handle = NULL;
+    *address = (uint32_t)phys;
     return true;
+}
+
+bool lv_vg_lite_port_map_buffer(vg_lite_buffer_t * buffer)
+{
+    if(!buffer) {
+        return false;
+    }
+    if(!buffer->memory || buffer->stride <= 0 || buffer->height <= 0) {
+        goto failed;
+    }
+
+    uint64_t bytes64 = (uint64_t)(uint32_t)buffer->stride * (uint32_t)buffer->height;
+    if(bytes64 == 0 || bytes64 > UINT32_MAX ||
+       !map_buffer_plane(buffer->memory, (uint32_t)bytes64,
+                         &buffer->handle, &buffer->address)) {
+        goto failed;
+    }
+
+    if(buffer->format == VG_LITE_NV12) {
+        uint64_t uv_bytes64 = (uint64_t)buffer->yuv.uv_stride * buffer->yuv.uv_height;
+        if(!buffer->yuv.uv_memory || uv_bytes64 == 0 || uv_bytes64 > UINT32_MAX ||
+           !map_buffer_plane(buffer->yuv.uv_memory, (uint32_t)uv_bytes64,
+                             &buffer->yuv.uv_handle, &buffer->yuv.uv_planar)) {
+            goto failed;
+        }
+    }
+
+    return true;
+
+failed:
+    buffer->handle = NULL;
+    buffer->address = 0;
+    buffer->yuv.uv_handle = NULL;
+    buffer->yuv.uv_planar = 0;
+    return false;
 }
 
 static bool cache_operation(const void * ptr, uint32_t size, bool invalidate)
