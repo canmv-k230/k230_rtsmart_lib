@@ -108,6 +108,15 @@ struct encoder_dev_cfg_t {
     struct encoder_pin_cfg_t cfg;
 };
 
+enum drv_touch_intr_mode {
+    DRV_TOUCH_INTR_RISING = 0,
+    DRV_TOUCH_INTR_FALLING,
+    DRV_TOUCH_INTR_BOTH,
+    DRV_TOUCH_INTR_HIGH,
+    DRV_TOUCH_INTR_LOW,
+    DRV_TOUCH_INTR_MODE_MAX,
+};
+
 struct drv_touch_config_t {
     int touch_dev_index;
 
@@ -115,7 +124,7 @@ struct drv_touch_config_t {
     int range_y;
 
     int pin_intr;
-    int intr_value;
+    int intr_value; /* enum drv_touch_intr_mode */
     int pin_reset;
     int reset_value;
 
