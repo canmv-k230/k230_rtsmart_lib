@@ -92,6 +92,8 @@ struct Agent {
 
 void agent_gather_candidate(Agent* agent, const char* urls, const char* username, const char* credential);
 
+int agent_set_host_address(Agent* agent, const char* address);
+
 void agent_create_ice_credential(Agent* agent);
 
 void agent_get_local_description(Agent* agent, char* description, int length);

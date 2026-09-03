@@ -83,6 +83,11 @@ typedef struct PeerConfiguration {
   void (*on_request_keyframe)(void* userdata);
   void* user_data;
 
+  /* Optional local IPv4 address to advertise as the host ICE candidate.
+   * This is needed for interfaces such as a SoftAP that cannot be selected
+   * as RT-Smart's default uplink. */
+  const char* local_ip;
+
 } PeerConfiguration;
 
 typedef struct PeerConnection PeerConnection;

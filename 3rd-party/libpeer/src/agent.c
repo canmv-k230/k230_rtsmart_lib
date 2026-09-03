@@ -165,6 +165,22 @@ static int agent_create_host_addr(Agent* agent) {
 #endif
   };
 
+  if (agent->b_host_addr) {
+    for (i = 0; i < sizeof(addr_type) / sizeof(addr_type[0]); i++) {
+      if (agent->host_addr.family != addr_type[i]) {
+        continue;
+      }
+
+      Address candidate_addr = agent->host_addr;
+      addr_set_port(&candidate_addr, agent->udp_sockets[i].bind_addr.port);
+      ice_candidate = agent->local_candidates + agent->local_candidates_count;
+      ice_candidate_create(ice_candidate, agent->local_candidates_count,
+                           ICE_CANDIDATE_TYPE_HOST, &candidate_addr);
+      agent->local_candidates_count++;
+    }
+    return 0;
+  }
+
   for (i = 0; i < sizeof(addr_type) / sizeof(addr_type[0]); i++) {
     for (j = 0; j < sizeof(iface_prefx) / sizeof(iface_prefx[0]); j++) {
       ice_candidate = agent->local_candidates + agent->local_candidates_count;
@@ -178,6 +194,30 @@ static int agent_create_host_addr(Agent* agent) {
     }
   }
 
+  return 0;
+}
+
+int agent_set_host_address(Agent* agent, const char* address) {
+  Address host_addr;
+
+  agent->b_host_addr = 0;
+  memset(&agent->host_addr, 0, sizeof(agent->host_addr));
+  if (address == NULL || address[0] == '\0') {
+    return 0;
+  }
+
+  memset(&host_addr, 0, sizeof(host_addr));
+  if (!addr_from_string(address, &host_addr)) {
+    LOGE("Invalid local host address: %s", address);
+    return -1;
+  }
+  if (host_addr.family != AF_INET) {
+    LOGE("Only an IPv4 local host address is supported: %s", address);
+    return -1;
+  }
+
+  agent->host_addr = host_addr;
+  agent->b_host_addr = 1;
   return 0;
 }
 
@@ -960,17 +1000,24 @@ void agent_process_stun_response(Agent* agent, StunMessage* stun_msg, Address* s
             if (!agent->nominated_pair ||
                 agent->nominated_pair->state != ICE_CANDIDATE_STATE_SUCCEEDED) {
               agent->nominated_pair = agent->active_pairs[i];
+              agent->binding_request_time = ports_get_epoch_time();
             } else if (agent->nominated_pair != agent->active_pairs[i]) {
               char src_addr_str[ADDRSTRLEN] = {0};
               addr_to_string(src_addr, src_addr_str, sizeof(src_addr_str));
               LOGI("Nominated pair already established, keeping current (late response from %s:%d ignored for nomination)",
                    src_addr_str, src_addr->port);
+            } else {
+              agent->binding_request_time = ports_get_epoch_time();
             }
             break;
           }
         }
         if (i == agent->active_pairs_count && agent->nominated_pair) {
           if (addr_equal(&agent->nominated_pair->remote->addr, src_addr)) {
+            /* An authenticated response from the selected path proves that
+             * the connection is alive even before the peer's next consent
+             * request arrives. */
+            agent->binding_request_time = ports_get_epoch_time();
             LOGD("Ignoring duplicate STUN response for nominated pair");
           } else {
             char src_addr_str[ADDRSTRLEN] = {0};

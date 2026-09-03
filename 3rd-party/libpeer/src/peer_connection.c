@@ -268,6 +268,10 @@ PeerConnection* peer_connection_create(PeerConfiguration* config) {
   memcpy(&pc->config, config, sizeof(PeerConfiguration));
 
   agent_create(&pc->agent);
+  if (pc->config.local_ip != NULL &&
+      agent_set_host_address(&pc->agent, pc->config.local_ip) != 0) {
+    LOGW("Ignoring invalid local_ip; falling back to interface detection");
+  }
 
   memset(&pc->sctp, 0, sizeof(pc->sctp));
 
