@@ -51,7 +51,7 @@ LDFLAGS_MBEDTLS := -n --static -T $(LOCAL_SRC_DIR)/port/link.lds -L$(RTSMART_3RD
 
 .PHONY: mbedtls_library
 mbedtls_library:
-	@$(MAKE) -C mbedtls/library CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)'
+	@$(MAKE) -C mbedtls/library -f Makefile -f ../../port/library_deps.mk all CFLAGS='$(CFLAGS_MBEDTLS)' LDFLAGS='$(LDFLAGS_MBEDTLS)'
 
 .PHONY: mbedtls_library-clean
 mbedtls_library-clean:
@@ -123,5 +123,6 @@ include $(SDK_RTSMART_SRC_DIR)/libs/mk/tools_install_header.mk
 
 $(LIB): install-headers
 mbedtls_library: install-headers
+$(OBJS): $(wildcard port/*.h)
 
 -include $(DEPS)

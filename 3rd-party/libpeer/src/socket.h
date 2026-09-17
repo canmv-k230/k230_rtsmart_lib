@@ -15,6 +15,8 @@ typedef struct TcpSocket {
 
 int udp_socket_open(UdpSocket* udp_socket, int family, int port);
 
+int udp_socket_rebind(UdpSocket* udp_socket, const Address* local_addr);
+
 int udp_socket_bind(UdpSocket* udp_socket, int port);
 
 void udp_socket_close(UdpSocket* udp_socket);

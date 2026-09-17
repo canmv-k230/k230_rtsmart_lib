@@ -70,6 +70,12 @@ static int dtls_srtp_cert_verify(void* data, mbedtls_x509_crt* crt, int depth, u
   return 0;
 }
 
+static int dtls_srtp_entropy(void* ctx, unsigned char* output, size_t len) {
+  (void)ctx;
+  return utils_random_bytes(output, len) == 0
+             ? 0 : MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
+}
+
 static int dtls_srtp_selfsign_cert(DtlsSrtp* dtls_srtp) {
   int ret;
 
@@ -89,15 +95,28 @@ static int dtls_srtp_selfsign_cert(DtlsSrtp* dtls_srtp) {
     return -1;
   }
 
-  mbedtls_ctr_drbg_seed(&dtls_srtp->ctr_drbg, mbedtls_entropy_func, &dtls_srtp->entropy, (const unsigned char*)pers, strlen(pers));
+  ret = mbedtls_ctr_drbg_seed(&dtls_srtp->ctr_drbg, dtls_srtp_entropy, NULL,
+                              (const unsigned char*)pers, strlen(pers));
+  if (ret != 0) {
+    free(cert_buf);
+    return ret;
+  }
 
 #if CONFIG_DTLS_USE_ECDSA
-  mbedtls_pk_setup(&dtls_srtp->pkey, mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY));
-  mbedtls_ecp_gen_key(MBEDTLS_ECP_DP_SECP256R1, mbedtls_pk_ec(dtls_srtp->pkey), mbedtls_ctr_drbg_random, &dtls_srtp->ctr_drbg);
+  ret = mbedtls_pk_setup(&dtls_srtp->pkey, mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY));
+  if (ret == 0) {
+    ret = mbedtls_ecp_gen_key(MBEDTLS_ECP_DP_SECP256R1, mbedtls_pk_ec(dtls_srtp->pkey), mbedtls_ctr_drbg_random, &dtls_srtp->ctr_drbg);
+  }
 #else
-  mbedtls_pk_setup(&dtls_srtp->pkey, mbedtls_pk_info_from_type(MBEDTLS_PK_RSA));
-  mbedtls_rsa_gen_key(mbedtls_pk_rsa(dtls_srtp->pkey), mbedtls_ctr_drbg_random, &dtls_srtp->ctr_drbg, RSA_KEY_LENGTH, 65537);
+  ret = mbedtls_pk_setup(&dtls_srtp->pkey, mbedtls_pk_info_from_type(MBEDTLS_PK_RSA));
+  if (ret == 0) {
+    ret = mbedtls_rsa_gen_key(mbedtls_pk_rsa(dtls_srtp->pkey), mbedtls_ctr_drbg_random, &dtls_srtp->ctr_drbg, RSA_KEY_LENGTH, 65537);
+  }
 #endif
+  if (ret != 0) {
+    free(cert_buf);
+    return ret;
+  }
 
   mbedtls_x509write_crt_init(&crt);
 
@@ -134,7 +153,9 @@ static int dtls_srtp_selfsign_cert(DtlsSrtp* dtls_srtp) {
     LOGE("mbedtls_x509write_crt_pem failed -0x%.4x", (unsigned int)-ret);
   }
 
-  mbedtls_x509_crt_parse(&dtls_srtp->cert, cert_buf, 2 * RSA_KEY_LENGTH);
+  if (ret == 0) {
+    ret = mbedtls_x509_crt_parse(&dtls_srtp->cert, cert_buf, 2 * RSA_KEY_LENGTH);
+  }
 
   mbedtls_x509write_crt_free(&crt);
 
@@ -162,9 +183,6 @@ int dtls_srtp_init(DtlsSrtp* dtls_srtp, DtlsSrtpRole role, void* user_data) {
   dtls_srtp->user_data = user_data;
   dtls_srtp->udp_send = dtls_srtp_udp_send;
   dtls_srtp->udp_recv = dtls_srtp_udp_recv;
-  dtls_srtp->reasm_buf = NULL;
-  dtls_srtp->reasm_len = 0;
-  dtls_srtp->reasm_off = 0;
 
   /* Free previous ssl/conf/cookie before re-init (needed on 2nd+ call).
    * Safe to call on zeroed structs (first call) — mbedtls treats NULL as no-op. */
@@ -185,7 +203,15 @@ int dtls_srtp_init(DtlsSrtp* dtls_srtp, DtlsSrtpRole role, void* user_data) {
     mbedtls_pk_init(&dtls_srtp->pkey);
     mbedtls_entropy_init(&dtls_srtp->entropy);
     mbedtls_ctr_drbg_init(&dtls_srtp->ctr_drbg);
-    dtls_srtp_selfsign_cert(dtls_srtp);
+    int ret = dtls_srtp_selfsign_cert(dtls_srtp);
+    if (ret != 0) {
+      LOGE("Failed to generate DTLS certificate: -0x%x", (unsigned int)-ret);
+      mbedtls_x509_crt_free(&dtls_srtp->cert);
+      mbedtls_pk_free(&dtls_srtp->pkey);
+      mbedtls_entropy_free(&dtls_srtp->entropy);
+      mbedtls_ctr_drbg_free(&dtls_srtp->ctr_drbg);
+      return ret;
+    }
     dtls_srtp->cert_cached = 1;
   }
   /* Subsequent calls: cert/pkey/entropy/ctr_drbg are reused as-is. */
@@ -238,17 +264,21 @@ int dtls_srtp_init(DtlsSrtp* dtls_srtp, DtlsSrtpRole role, void* user_data) {
 
   mbedtls_ssl_conf_cert_req_ca_list(&dtls_srtp->conf, MBEDTLS_SSL_CERT_REQ_CA_LIST_DISABLED);
 
-  mbedtls_ssl_setup(&dtls_srtp->ssl, &dtls_srtp->conf);
-
-  return 0;
+  int ret = mbedtls_ssl_setup(&dtls_srtp->ssl, &dtls_srtp->conf);
+  if (ret == 0) {
+    /* Register once: replacing these callbacks cancels retransmission timers. */
+    mbedtls_ssl_set_timer_cb(&dtls_srtp->ssl, &dtls_srtp->timer,
+                             mbedtls_timing_set_delay, mbedtls_timing_get_delay);
+  }
+  if (ret == 0 && role == DTLS_SRTP_ROLE_CLIENT) {
+    /* WebRTC authenticates the certificate against the SDP fingerprint,
+     * not a DNS hostname. Explicitly opt out of hostname verification. */
+    ret = mbedtls_ssl_set_hostname(&dtls_srtp->ssl, NULL);
+  }
+  return ret;
 }
 
 void dtls_srtp_deinit(DtlsSrtp* dtls_srtp) {
-  if (dtls_srtp->reasm_buf) {
-    free(dtls_srtp->reasm_buf);
-    dtls_srtp->reasm_buf = NULL;
-  }
-
   mbedtls_ssl_free(&dtls_srtp->ssl);
   mbedtls_ssl_config_free(&dtls_srtp->conf);
 
@@ -398,10 +428,6 @@ static void dtls_srtp_key_derivation_cb(void* context,
 }
 
 static int dtls_srtp_do_handshake(DtlsSrtp* dtls_srtp) {
-  static mbedtls_timing_delay_context timer;
-
-  mbedtls_ssl_set_timer_cb(&dtls_srtp->ssl, &timer, mbedtls_timing_set_delay, mbedtls_timing_get_delay);
-
 #if CONFIG_MBEDTLS_2_X
   mbedtls_ssl_conf_export_keys_ext_cb(&dtls_srtp->conf, dtls_srtp_key_derivation_cb, dtls_srtp);
 #else
@@ -497,12 +523,7 @@ int dtls_srtp_handshake(DtlsSrtp* dtls_srtp, Address* addr) {
 }
 
 void dtls_srtp_reset_session(DtlsSrtp* dtls_srtp) {
-  if (dtls_srtp->reasm_buf) {
-    free(dtls_srtp->reasm_buf);
-    dtls_srtp->reasm_buf = NULL;
-    dtls_srtp->reasm_len = 0;
-    dtls_srtp->reasm_off = 0;
-  }
+  mbedtls_timing_set_delay(&dtls_srtp->timer, 0, 0);
 
   if (dtls_srtp->state == DTLS_SRTP_STATE_CONNECTED) {
     srtp_dealloc(dtls_srtp->srtp_in);

@@ -8,6 +8,10 @@
 #define CONFIG_USE_LWIP 0
 #endif
 
+#ifndef CONFIG_USE_HWRNG
+#define CONFIG_USE_HWRNG 0
+#endif
+
 #ifndef CONFIG_USE_GETIFADDRS
 #define CONFIG_USE_GETIFADDRS 1
 #endif

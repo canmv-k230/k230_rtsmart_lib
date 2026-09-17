@@ -21,3 +21,7 @@ void peer_deinit() {
   srtp_shutdown();
   sctp_usrsctp_deinit();
 }
+
+int peer_random_bytes(uint8_t* output, size_t len) {
+  return utils_random_bytes(output, len);
+}

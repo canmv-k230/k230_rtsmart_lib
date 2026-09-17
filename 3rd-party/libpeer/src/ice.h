@@ -59,6 +59,8 @@ void ice_candidate_to_description(IceCandidate* candidate, char* description, in
 
 int ice_candidate_from_description(IceCandidate* candidate, char* description, char* end);
 
+int ice_candidate_equal(const IceCandidate* a, const IceCandidate* b);
+
 int ice_candidate_get_local_address(IceCandidate* candidate, Address* address);
 
 #endif  // ICE_H_

@@ -18,6 +18,14 @@ Hardware acceleration is enabled by compiling with:
 This header is the *full* Mbed TLS configuration (not a delta). It defines
 which `MBEDTLS_*_ALT` macros are active.
 
+ECDH and ECDSA signing use Mbed TLS's software implementations by default.
+The corresponding PUF ALT implementations below are disabled because their
+shared `PRK_0` slot is not isolated across concurrent handshakes or multi-ioctl
+signing operations. Per-operation hardware locks do not cover that lifetime.
+ECDSA verification and the symmetric/hash accelerators remain enabled.
+`MBEDTLS_ENTROPY_HARDWARE_ALT` supplies hardware entropy to Mbed TLS's default
+DRBG, including callers outside libpeer. RNG failures fail closed.
+
 ### Files
 
 | File | Purpose |
@@ -36,6 +44,7 @@ which `MBEDTLS_*_ALT` macros are active.
 | `timing.c`, `timing_alt.h` | RT-Smart timing support |
 | `net_sockets.c` | RT-Smart network socket support |
 | `platform_util.c` | Platform utility functions |
+| `entropy_poll.c` | Hardware entropy source for the default DRBG |
 
 ---
 
@@ -255,8 +264,10 @@ Same as ECDSA: P-192, P-224, P-256, P-384, P-521.
 - P-384 and P-521 ECDHE: gen_public works in HW (ephemeral key generation
   bypasses KWP), but compute_shared with an externally-provided SW private
   key falls back to SW due to the KWP import limitation.
-- Only one PRK slot (PRK_0) is used. Concurrent ECDH operations from
-  different threads will serialize on the hardware lock.
+- Only one PRK slot (PRK_0) is used. The hardware lock serializes individual
+  ioctls, not the full gen_public/compute_shared sequence; another handshake
+  or signing operation can overwrite the key between calls. This is why
+  these ALT options are disabled in the default configuration.
 - The sentinel encoding (`0x100 | slot`) is fragile: if application code
   inspects or modifies `d` between gen_public and compute_shared, the
   sentinel is lost and the key must be re-imported (which will fail for
