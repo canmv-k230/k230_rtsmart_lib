@@ -612,9 +612,26 @@ void peer_connection_set_remote_description(PeerConnection* pc, const char* sdp,
     if (line_len >= strlen("m=video") &&
         memcmp(start, "m=video", strlen("m=video")) == 0) {
       ssrc = &pc->remote_vssrc;
+      if (type == SDP_TYPE_ANSWER) {
+        const char* port_str = start + strlen("m=video") + 1;
+        if (port_str < line && *port_str == '0' &&
+            (port_str + 1 == line || port_str[1] < '0' || port_str[1] > '9')) {
+          LOGE("Remote answer rejected video m-line (port=0): browser has no "
+               "compatible video codec, e.g. no H.265/HEVC decode support. "
+               "Try restarting with -t h264.");
+        }
+      }
     } else if (line_len >= strlen("m=audio") &&
                memcmp(start, "m=audio", strlen("m=audio")) == 0) {
       ssrc = &pc->remote_assrc;
+      if (type == SDP_TYPE_ANSWER) {
+        const char* port_str = start + strlen("m=audio") + 1;
+        if (port_str < line && *port_str == '0' &&
+            (port_str + 1 == line || port_str[1] < '0' || port_str[1] > '9')) {
+          LOGE("Remote answer rejected audio m-line (port=0): browser has no "
+               "compatible audio codec.");
+        }
+      }
     }
 
     if (ssrc && line_len > strlen("a=ssrc:") &&
