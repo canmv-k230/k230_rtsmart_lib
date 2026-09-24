@@ -58,7 +58,9 @@ typedef struct PeerSignaling {
   char host[HOST_MAX_LEN];
   char path[PATH_MAX_LEN];
   char token[TOKEN_MAX_LEN];
-  char client_id[32];
+  /* client_id is extracted from the last segment of `path`, so it can never
+   * exceed PATH_MAX_LEN; bound it to that instead of a hand-picked size. */
+  char client_id[PATH_MAX_LEN];
 
   PeerConnection* pc;
 
