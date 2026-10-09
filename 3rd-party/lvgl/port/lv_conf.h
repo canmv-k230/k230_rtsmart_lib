@@ -32,6 +32,10 @@
 #define CONFIG_RTSMART_3RD_PARTY_LVGL_USE_VGLITE 0
 #endif
 
+#ifndef CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL_BENCHMARK
+#define CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL_BENCHMARK 0
+#endif
+
 #ifndef CONFIG_RTSMART_3RD_PARTY_LVGL_VGLITE_TESS_WIDTH
 #define CONFIG_RTSMART_3RD_PARTY_LVGL_VGLITE_TESS_WIDTH 1920
 #endif
@@ -242,10 +246,10 @@
         #define LV_DRAW_SW_CIRCLE_CACHE_SIZE 4
     #endif
 
-    #define  LV_USE_DRAW_SW_ASM     LV_DRAW_SW_ASM_NONE
+    #define  LV_USE_DRAW_SW_ASM     LV_DRAW_SW_ASM_CUSTOM
 
     #if LV_USE_DRAW_SW_ASM == LV_DRAW_SW_ASM_CUSTOM
-        #define  LV_DRAW_SW_ASM_CUSTOM_INCLUDE ""
+        #define  LV_DRAW_SW_ASM_CUSTOM_INCLUDE "lv_k230_rvv.h"
     #endif
 
     /** Enable drawing complex gradients in software: linear at an angle, radial or conical */
@@ -338,7 +342,7 @@
     #define LV_VG_LITE_USE_ASSERT 0
 
     /** VG-Lite flush commit trigger threshold. GPU will try to batch these many draw tasks. */
-    #define LV_VG_LITE_FLUSH_MAX_COUNT 8
+    #define LV_VG_LITE_FLUSH_MAX_COUNT 32
 
     /** Enable border to simulate shadow.
      *  NOTE: which usually improves performance,
@@ -639,10 +643,10 @@
 #define LV_FONT_MONTSERRAT_14 1
 #define LV_FONT_MONTSERRAT_16 0
 #define LV_FONT_MONTSERRAT_18 0
-#define LV_FONT_MONTSERRAT_20 0
+#define LV_FONT_MONTSERRAT_20 CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL_BENCHMARK
 #define LV_FONT_MONTSERRAT_22 0
-#define LV_FONT_MONTSERRAT_24 0
-#define LV_FONT_MONTSERRAT_26 0
+#define LV_FONT_MONTSERRAT_24 CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL_BENCHMARK
+#define LV_FONT_MONTSERRAT_26 CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL_BENCHMARK
 #define LV_FONT_MONTSERRAT_28 0
 #define LV_FONT_MONTSERRAT_30 0
 #define LV_FONT_MONTSERRAT_32 0
@@ -1076,10 +1080,10 @@
 #define LV_USE_SNAPSHOT 0
 
 /** 1: Enable system monitor component */
-#define LV_USE_SYSMON   0
+#define LV_USE_SYSMON   CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL_BENCHMARK
 #if LV_USE_SYSMON
     /** Get the idle percentage. E.g. uint32_t my_get_idle(void); */
-    #define LV_SYSMON_GET_IDLE lv_os_get_idle_percent
+    #define LV_SYSMON_GET_IDLE lv_k230_sysmon_get_idle_percent
     /** 1: Enable usage of lv_os_get_proc_idle_percent.*/
     #define LV_SYSMON_PROC_IDLE_AVAILABLE 0
     #if LV_SYSMON_PROC_IDLE_AVAILABLE
@@ -1090,7 +1094,7 @@
 
     /** 1: Show CPU usage and FPS count.
      *  - Requires `LV_USE_SYSMON = 1` */
-    #define LV_USE_PERF_MONITOR 0
+    #define LV_USE_PERF_MONITOR CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL_BENCHMARK
     #if LV_USE_PERF_MONITOR
         #define LV_USE_PERF_MONITOR_POS LV_ALIGN_BOTTOM_RIGHT
 
@@ -1438,13 +1442,13 @@
 
 #if LV_BUILD_DEMOS
     /** Show some widgets. This might be required to increase `LV_MEM_SIZE`. */
-    #define LV_USE_DEMO_WIDGETS 0
+    #define LV_USE_DEMO_WIDGETS CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL_BENCHMARK
 
     /** Demonstrate usage of encoder and keyboard. */
     #define LV_USE_DEMO_KEYPAD_AND_ENCODER 0
 
     /** Benchmark your system */
-    #define LV_USE_DEMO_BENCHMARK 0
+    #define LV_USE_DEMO_BENCHMARK CONFIG_RTSMART_3RD_PARTY_ENABLE_LVGL_BENCHMARK
 
     #if LV_USE_DEMO_BENCHMARK
         /** Use fonts where bitmaps are aligned 16 byte and has Nx16 byte stride */

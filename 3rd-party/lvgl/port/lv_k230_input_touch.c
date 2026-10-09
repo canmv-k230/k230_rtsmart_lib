@@ -27,6 +27,50 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "mpi_vo_api.h"
+#include "src/display/lv_display.h"
+
+typedef struct {
+    drv_touch_inst_t* touch_inst;
+    k_gdma_rotation_e display_rotation;
+} lv_k230_touch_ctx_t;
+
+static void lv_k230_touch_transform_point(lv_indev_t* indev, k_gdma_rotation_e rotation,
+                                          lv_point_t* point)
+{
+    lv_display_t* display = lv_indev_get_display(indev);
+    int32_t x;
+    int32_t y;
+    int32_t width;
+    int32_t height;
+
+    if (display == NULL || point == NULL) {
+        return;
+    }
+
+    x = point->x;
+    y = point->y;
+    width = lv_display_get_horizontal_resolution(display);
+    height = lv_display_get_vertical_resolution(display);
+
+    switch (rotation) {
+    case GDMA_ROTATE_DEGREE_90:
+        point->x = y;
+        point->y = height - x - 1;
+        break;
+    case GDMA_ROTATE_DEGREE_180:
+        point->x = width - x - 1;
+        point->y = height - y - 1;
+        break;
+    case GDMA_ROTATE_DEGREE_270:
+        point->x = width - y - 1;
+        point->y = x;
+        break;
+    default:
+        break;
+    }
+}
+
 /**
  * @brief Touch input device read callback
  * @param indev Pointer to input device
@@ -37,9 +81,9 @@ static void lv_k230_touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data)
     struct drv_touch_data touch_data[DRV_TOUCH_POINT_NUMBER_MAX];
     int                   points_read;
 
-    drv_touch_inst_t* touch_inst = (drv_touch_inst_t*)lv_indev_get_driver_data(indev);
+    lv_k230_touch_ctx_t* ctx = (lv_k230_touch_ctx_t*)lv_indev_get_driver_data(indev);
 
-    if (NULL == touch_inst) {
+    if (ctx == NULL || ctx->touch_inst == NULL) {
         printf("invalid touch instance\n");
         return;
     }
@@ -52,7 +96,7 @@ static void lv_k230_touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data)
     data->continue_reading = false;
 
     /* Read touch data from driver */
-    points_read = drv_touch_read(touch_inst, touch_data, DRV_TOUCH_POINT_NUMBER_MAX);
+    points_read = drv_touch_read(ctx->touch_inst, touch_data, DRV_TOUCH_POINT_NUMBER_MAX);
 
     if (points_read < 0) {
         /* Read error, keep released state */
@@ -79,6 +123,7 @@ static void lv_k230_touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data)
         /* Set coordinates */
         data->point.x = point->x_coordinate;
         data->point.y = point->y_coordinate;
+        lv_k230_touch_transform_point(indev, ctx->display_rotation, &data->point);
 
         /* Use timestamp from touch driver if available */
         if (point->timestamp != 0) {
@@ -94,17 +139,17 @@ static void lv_k230_touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data)
 
 static void event_cb(lv_event_t* e)
 {
-    lv_event_code_t   code       = lv_event_get_code(e);
-    lv_indev_t*       indev      = (lv_indev_t*)lv_event_get_target(e);
-    drv_touch_inst_t* touch_inst = (drv_touch_inst_t*)lv_indev_get_driver_data(indev);
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_indev_t* indev = (lv_indev_t*)lv_event_get_target(e);
+    lv_k230_touch_ctx_t* ctx = (lv_k230_touch_ctx_t*)lv_indev_get_driver_data(indev);
 
     switch (code) {
     case LV_EVENT_DELETE: {
-        if (touch_inst != NULL) {
+        if (ctx != NULL) {
             printf("destroy touch instance\n");
-
-            /* Destroy touch driver instance */
-            drv_touch_inst_destroy(&touch_inst);
+            drv_touch_inst_destroy(&ctx->touch_inst);
+            free(ctx);
+            lv_indev_set_driver_data(indev, NULL);
         }
     } break;
     default: {
@@ -120,9 +165,11 @@ static void event_cb(lv_event_t* e)
  */
 lv_indev_t* lv_k230_touch_init(int touch_id)
 {
-    lv_indev_t*       indev = NULL;
-    drv_touch_inst_t* inst  = NULL;
-    int               ret;
+    lv_indev_t* indev = NULL;
+    drv_touch_inst_t* inst = NULL;
+    lv_k230_touch_ctx_t* ctx = NULL;
+    k_vo_dev_attr dev_attr;
+    int ret;
 
     /* Create touch driver instance */
     ret = drv_touch_inst_create(touch_id, &inst);
@@ -131,11 +178,23 @@ lv_indev_t* lv_k230_touch_init(int touch_id)
         return NULL;
     }
 
+    ctx = calloc(1, sizeof(*ctx));
+    if (ctx == NULL) {
+        drv_touch_inst_destroy(&inst);
+        return NULL;
+    }
+    ctx->touch_inst = inst;
+
+    if (kd_mpi_vo_get_dev_attr(&dev_attr) == K_SUCCESS) {
+        ctx->display_rotation = dev_attr.dev_rot_flg;
+    }
+
     /* Create LVGL input device */
     indev = lv_indev_create();
     if (indev == NULL) {
         printf("[lv_touch] failed to create LVGL input device\n");
-        drv_touch_inst_destroy(&inst);
+        drv_touch_inst_destroy(&ctx->touch_inst);
+        free(ctx);
         return NULL;
     }
 
@@ -145,8 +204,7 @@ lv_indev_t* lv_k230_touch_init(int touch_id)
     /* Set read callback */
     lv_indev_set_read_cb(indev, lv_k230_touch_read_cb);
 
-    /* Store touch instance as driver data for cleanup */
-    lv_indev_set_driver_data(indev, inst);
+    lv_indev_set_driver_data(indev, ctx);
 
     lv_indev_add_event_cb(indev, event_cb, LV_EVENT_DELETE, NULL);
 

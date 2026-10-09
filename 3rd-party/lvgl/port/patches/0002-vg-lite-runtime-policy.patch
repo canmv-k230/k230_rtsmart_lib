@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: RT-Smart Port <port@lvgl.invalid>
+Date: Thu, 1 Oct 2026 12:00:00 +0800
+Subject: [PATCH] vg_lite: add runtime renderer policy hooks
+
+Let the K230 port disable VG-Lite task selection for software benchmark
+modes and count tasks which actually reach the hardware renderer.
+
+---
+ src/draw/vg_lite/lv_draw_vg_lite.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/draw/vg_lite/lv_draw_vg_lite.c b/src/draw/vg_lite/lv_draw_vg_lite.c
+index 284eefea6..d03ab4ee1 100644
+--- a/src/draw/vg_lite/lv_draw_vg_lite.c
++++ b/src/draw/vg_lite/lv_draw_vg_lite.c
+@@ -139,6 +139,10 @@ static void draw_execute(lv_draw_vg_lite_unit_t * u)
+     /* remember draw unit for access to unit's context */
+     t->draw_unit = (lv_draw_unit_t *)u;
+ 
++#if LV_VG_LITE_USE_GPU_INIT
++    lv_vg_lite_port_note_task(t);
++#endif
++
+     /* VG-Lite will output premultiplied image, set the flag correspondingly. */
+     lv_draw_buf_set_flag(layer->draw_buf, LV_IMAGE_FLAGS_PREMULTIPLIED);
+ 
+@@ -252,6 +256,10 @@ static int32_t draw_evaluate(lv_draw_unit_t * draw_unit, lv_draw_task_t * task)
+ {
+     LV_UNUSED(draw_unit);
+ 
++#if LV_VG_LITE_USE_GPU_INIT
++    if(!lv_vg_lite_port_should_render(task)) return 0;
++#endif
++
+     /* Return if target buffer format is not supported. */
+     const lv_draw_dsc_base_t * base_dsc = task->draw_dsc;
+     if(!lv_vg_lite_is_dest_cf_supported(base_dsc->layer->color_format)) {
+-- 
+2.50.1

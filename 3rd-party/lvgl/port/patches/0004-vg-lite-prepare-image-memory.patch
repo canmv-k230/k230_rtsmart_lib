@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: RT-Smart Port <port@lvgl.invalid>
+Date: Thu, 8 Oct 2026 12:00:00 +0800
+Subject: [PATCH] image: prepare decoded buffers for VG-Lite memory access
+
+Let the platform copy images that cannot be mapped by the GPU. Doing this
+in decoder post-processing gives the existing decoder and cache ownership
+of the replacement buffer, including its lifetime across queued GPU work.
+
+---
+ src/draw/lv_image_decoder.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/src/draw/lv_image_decoder.c b/src/draw/lv_image_decoder.c
+--- a/src/draw/lv_image_decoder.c
++++ b/src/draw/lv_image_decoder.c
+@@ -7,6 +7,10 @@
+  *      INCLUDES
+  *********************/
+ #include "lv_image_decoder_private.h"
++#if LV_USE_DRAW_VG_LITE && defined(LV_VG_LITE_USE_BUFFER_MAP_HOOK) && LV_VG_LITE_USE_BUFFER_MAP_HOOK
++#include "lv_k230_vglite_hooks.h"
++#endif
++
+ #include "../misc/lv_assert.h"
+ #include "../draw/lv_draw_image.h"
+ #include "../misc/lv_ll.h"
+@@ -276,6 +280,9 @@ lv_draw_buf_t * lv_image_decoder_post_process(lv_image_decoder_dsc_t * dsc, lv_draw_buf_t * decoded)
+ {
+     if(decoded == NULL) return NULL; /*No need to adjust*/
+ 
++#if LV_USE_DRAW_VG_LITE && defined(LV_VG_LITE_USE_BUFFER_MAP_HOOK) && LV_VG_LITE_USE_BUFFER_MAP_HOOK
++    lv_draw_buf_t * original = decoded;
++#endif
+     lv_image_decoder_args_t * args = &dsc->args;
+     if(args->stride_align && decoded->header.cf != LV_COLOR_FORMAT_RGB565A8) {
+         uint32_t stride_expect = lv_draw_buf_width_to_stride(decoded->header.w, decoded->header.cf);
+@@ -319,6 +326,14 @@ lv_draw_buf_t * lv_image_decoder_post_process(lv_image_decoder_dsc_t * dsc, lv_draw_buf_t * decoded)
+         }
+     }
+ 
++#if LV_USE_DRAW_VG_LITE && defined(LV_VG_LITE_USE_BUFFER_MAP_HOOK) && LV_VG_LITE_USE_BUFFER_MAP_HOOK
++    lv_draw_buf_t * prepared = lv_vg_lite_port_prepare_image(decoded);
++    if(prepared != decoded && decoded != original) {
++        lv_draw_buf_destroy(decoded);
++    }
++    decoded = prepared;
++#endif
++
+     return decoded;
+ }
+ 
+-- 
+2.50.1

@@ -14,6 +14,72 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "src/draw/lv_draw_private.h"
+
+static lv_k230_renderer_t s_renderer =
+#if LV_USE_DRAW_VG_LITE
+    LV_K230_RENDERER_VGLITE;
+#else
+    LV_K230_RENDERER_RVV;
+#endif
+static lv_k230_renderer_stats_t s_renderer_stats;
+
+bool lv_k230_renderer_set(lv_k230_renderer_t renderer)
+{
+    if(renderer < LV_K230_RENDERER_SW || renderer > LV_K230_RENDERER_VGLITE) {
+        return false;
+    }
+#if !LV_USE_DRAW_VG_LITE
+    if(renderer == LV_K230_RENDERER_VGLITE) {
+        return false;
+    }
+#endif
+    s_renderer = renderer;
+    return true;
+}
+
+bool lv_k230_renderer_rvv_enabled(void)
+{
+    return s_renderer != LV_K230_RENDERER_SW;
+}
+
+bool lv_k230_renderer_uses_vglite(void)
+{
+    return s_renderer == LV_K230_RENDERER_VGLITE;
+}
+
+void lv_k230_renderer_reset_stats(void)
+{
+    s_renderer_stats = (lv_k230_renderer_stats_t) {0};
+}
+
+void lv_k230_renderer_get_stats(lv_k230_renderer_stats_t * stats)
+{
+    if(stats) {
+        *stats = s_renderer_stats;
+    }
+}
+
+void lv_k230_renderer_note_rvv(uint64_t pixels)
+{
+    s_renderer_stats.rvv_tasks++;
+    s_renderer_stats.rvv_pixels += pixels;
+}
+
+const char * lv_k230_vglite_renderer_name(void)
+{
+    switch(s_renderer) {
+        case LV_K230_RENDERER_SW:
+            return "sw";
+        case LV_K230_RENDERER_RVV:
+            return "rvv+sw";
+        case LV_K230_RENDERER_VGLITE:
+            return "vg_lite+rvv+sw";
+        default:
+            return "unknown";
+    }
+}
+
 #if LV_USE_DRAW_VG_LITE
 #include <pthread.h>
 
@@ -53,6 +119,48 @@ static pthread_mutex_t s_lock = PTHREAD_MUTEX_INITIALIZER;
 static lv_k230_vglite_buffer_node_t * s_buffers;
 static lv_k230_vglite_address_cache_t s_address_cache[ADDRESS_CACHE_COUNT];
 static bool s_gpu_inited;
+
+bool lv_vg_lite_port_should_render(const lv_draw_task_t * task)
+{
+    if(!task || !lv_k230_renderer_uses_vglite()) {
+        return false;
+    }
+
+    /* VG-Lite writes premultiplied pixels. Keep straight-alpha targets on
+     * software so labels and other fallback tasks use the same alpha format. */
+    const lv_draw_dsc_base_t * base = task->draw_dsc;
+    if(base->layer->color_format == LV_COLOR_FORMAT_ARGB8888) {
+        return false;
+    }
+
+    if(task->type == LV_DRAW_TASK_TYPE_LABEL || task->type == LV_DRAW_TASK_TYPE_LETTER) {
+        return false;
+    }
+
+    if(task->type == LV_DRAW_TASK_TYPE_IMAGE) {
+        const lv_draw_image_dsc_t * dsc = task->draw_dsc;
+        /* K230 rejects VG_LITE_PATTERN_REPEAT; let software render tiled images. */
+        if(dsc->tile && !vg_lite_query_feature(gcFEATURE_BIT_VG_IM_REPEAT_REFLECT)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void lv_vg_lite_port_note_task(const lv_draw_task_t * task)
+{
+    if(!task) {
+        return;
+    }
+
+    int32_t width = lv_area_get_width(&task->area);
+    int32_t height = lv_area_get_height(&task->area);
+    s_renderer_stats.vglite_tasks++;
+    if(width > 0 && height > 0) {
+        s_renderer_stats.vglite_pixels += (uint64_t)(uint32_t)width * (uint32_t)height;
+    }
+}
 
 static bool range_in_node(const lv_k230_vglite_buffer_node_t * node, const void * ptr, size_t size,
                           size_t * offset_out)
@@ -394,7 +502,7 @@ bool lv_k230_vglite_get_buffer_phys(const void * ptr, size_t size, k_u64 * phys)
     return true;
 }
 
-bool lv_vg_lite_port_draw_buf_is_gpu_accessible(const lv_draw_buf_t * draw_buf)
+static bool draw_buf_is_gpu_accessible(const lv_draw_buf_t * draw_buf)
 {
     if(!draw_buf || !draw_buf->data || draw_buf->data_size == 0) {
         return false;
@@ -417,6 +525,34 @@ bool lv_vg_lite_port_draw_buf_is_gpu_accessible(const lv_draw_buf_t * draw_buf)
 
     uintptr_t address;
     return lv_vg_lite_port_get_buffer_addr(draw_buf->data, draw_buf->data_size, &address);
+}
+
+lv_draw_buf_t * lv_vg_lite_port_prepare_image(lv_draw_buf_t * decoded)
+{
+    if(!decoded || !lv_k230_renderer_uses_vglite()) {
+        return decoded;
+    }
+
+    bool straight_alpha = decoded->header.cf == LV_COLOR_FORMAT_ARGB8888 &&
+                          !lv_draw_buf_has_flag(decoded, LV_IMAGE_FLAGS_PREMULTIPLIED);
+    if(!straight_alpha && draw_buf_is_gpu_accessible(decoded)) {
+        return decoded;
+    }
+
+    /* ELF image arrays may span noncontiguous physical pages. The decoder owns
+     * this GPU-accessible copy. Premultiply straight-alpha images here because
+     * K230's LVGL blend mode does not multiply their RGB channels by alpha. */
+    lv_draw_buf_t * prepared = lv_draw_buf_dup_ex(lv_draw_buf_get_image_handlers(), decoded);
+    if(prepared) {
+        if(straight_alpha) {
+            lv_draw_buf_premultiply(prepared);
+            /* Software consumers of the image cache select blending by format. */
+            prepared->header.cf = LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED;
+        }
+        /* Layer decoding can disable the decoder's usual cache flush. */
+        lv_draw_buf_flush_cache(prepared, NULL);
+    }
+    return prepared;
 }
 
 static bool map_buffer_plane(void * memory, uint32_t size, void ** handle, uint32_t * address)
@@ -699,11 +835,6 @@ bool lv_k230_vglite_wait_idle(void)
     return true;
 }
 
-const char * lv_k230_vglite_renderer_name(void)
-{
-    return "vg_lite+sw";
-}
-
 #else
 
 void lv_k230_vglite_register_buffer(void * virt, k_u64 phys, size_t size, bool cached)
@@ -749,11 +880,6 @@ bool lv_k230_vglite_get_buffer_phys(const void * ptr, size_t size, k_u64 * phys)
 bool lv_k230_vglite_wait_idle(void)
 {
     return true;
-}
-
-const char * lv_k230_vglite_renderer_name(void)
-{
-    return "sw";
 }
 
 #endif

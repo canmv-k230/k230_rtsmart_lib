@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: RT-Smart Port <port@lvgl.invalid>
+Date: Thu, 8 Oct 2026 12:00:00 +0800
+Subject: [PATCH] vg_lite: complete queued tasks only after GPU finish
+
+Keep batched GPU tasks queued so overlapping software tasks cannot run
+until their GPU dependencies have completed. Retain batching between
+tasks assigned to the same GPU draw unit.
+
+---
+ src/draw/vg_lite/lv_draw_vg_lite.c | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/src/draw/vg_lite/lv_draw_vg_lite.c b/src/draw/vg_lite/lv_draw_vg_lite.c
+--- a/src/draw/vg_lite/lv_draw_vg_lite.c
++++ b/src/draw/vg_lite/lv_draw_vg_lite.c
+@@ -208,6 +208,19 @@ static void draw_execute(lv_draw_vg_lite_unit_t * u)
+     lv_vg_lite_flush(u);
+ }
+ 
++static void finish_tasks(lv_draw_vg_lite_unit_t * u, lv_layer_t * layer)
++{
++    /* Submission alone does not release dependencies on the GPU's pixels. */
++    lv_vg_lite_finish(u);
++
++    for(lv_draw_task_t * task = layer->draw_task_head; task; task = task->next) {
++        if(task->state == LV_DRAW_TASK_STATE_QUEUED &&
++           task->preferred_draw_unit_id == VG_LITE_DRAW_UNIT_ID) {
++            task->state = LV_DRAW_TASK_STATE_FINISHED;
++        }
++    }
++}
++
+ static int32_t draw_dispatch(lv_draw_unit_t * draw_unit, lv_layer_t * layer)
+ {
+     lv_draw_vg_lite_unit_t * u = (lv_draw_vg_lite_unit_t *)draw_unit;
+@@ -222,7 +235,7 @@ static int32_t draw_dispatch(lv_draw_unit_t * draw_unit, lv_layer_t * layer)
+ 
+     /* Return 0 is no selection, some tasks can be supported by other units. */
+     if(!t || t->preferred_draw_unit_id != VG_LITE_DRAW_UNIT_ID) {
+-        lv_vg_lite_finish(u);
++        finish_tasks(u, layer);
+         return LV_DRAW_UNIT_IDLE;
+     }
+ 
+@@ -246,7 +259,7 @@ static int32_t draw_dispatch(lv_draw_unit_t * draw_unit, lv_layer_t * layer)
+ 
+     draw_execute(u);
+ 
+-    u->task_act->state = LV_DRAW_TASK_STATE_FINISHED;
++    u->task_act->state = LV_DRAW_TASK_STATE_QUEUED;
+     u->task_act = NULL;
+ 
+     /*The draw unit is free now. Request a new dispatching as it can get a new task*/
+-- 
+2.50.1

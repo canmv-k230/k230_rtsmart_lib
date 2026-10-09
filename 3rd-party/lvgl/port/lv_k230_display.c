@@ -26,7 +26,6 @@
 
 #include "lv_k230_image_convert.h"
 
-#include "k_gsdma_comm.h"
 #include "k_type.h"
 #include "lv_k230_vglite.h"
 #include "lvgl.h"
@@ -37,13 +36,17 @@
 #include "mpi_gsdma_api.h"
 #include "mpi_sys_api.h"
 #include "mpi_vb_api.h"
+#include "mpi_vo_api.h"
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #ifndef LV_K230_DISPLAY_PRINT_FLUSH_FPS
-#define LV_K230_DISPLAY_PRINT_FLUSH_FPS 1
+#define LV_K230_DISPLAY_PRINT_FLUSH_FPS 0
 #endif
 
 typedef struct {
@@ -52,6 +55,10 @@ typedef struct {
     size_t             data_size; // lvgl real used data size
     k_vb_blk_handle    block_handle;
     k_video_frame_info vf_info;
+    lv_draw_buf_t      draw_buf;
+    bool               sync_rows_valid;
+    int32_t            sync_y1;
+    int32_t            sync_y2;
 } lv_k230_display_buffer_t;
 
 typedef struct {
@@ -61,13 +68,20 @@ typedef struct {
 
     int                      buffer_count; /* buffer for lvgl count */
     k_u32                    buffer_pool_id; /* buffer pool id */
-    lv_k230_display_buffer_t buffer[2]; /* for lvgl use */
+    lv_k230_display_buffer_t buffer[3]; /* displayed, pending, drawing */
     bool                     buffer_cached;
+    lv_k230_display_buffer_t* last_buffer;
+    bool                     reconfigure_failed;
+
+    bool    dirty_rows_valid;
+    int32_t dirty_y1;
+    int32_t dirty_y2;
 
     lv_display_t* lv_disp;
-} lv_k230_display_intstance_t;
+} lv_k230_display_instance_t;
 
 static uint32_t s_display_count;
+static k_s32 k230_display_configure_osd(lv_k230_display_instance_t* inst);
 
 static k_u8 lv_k230_map_color_format_to_pixel_size(lv_color_format_t color_format)
 {
@@ -132,7 +146,7 @@ static k_u8 lv_k230_osd_layer_pixel_fmt_bpp(k_pixel_format pixel_fmt)
 }
 
 /* Helper function to allocate and map a single buffer */
-static int k230_display_allocate_single_buffer(lv_k230_display_intstance_t* inst, lv_k230_display_buffer_t* buffer,
+static int k230_display_allocate_single_buffer(lv_k230_display_instance_t* inst, lv_k230_display_buffer_t* buffer,
                                                size_t buffer_size)
 {
     buffer->block_handle = kd_mpi_vb_get_block(inst->buffer_pool_id, buffer_size, NULL);
@@ -165,7 +179,7 @@ static int k230_display_allocate_single_buffer(lv_k230_display_intstance_t* inst
 }
 
 /* Helper function to setup frame information for a buffer */
-static void k230_display_setup_frame_info(lv_k230_display_intstance_t* inst, lv_k230_display_buffer_t* buffer)
+static void k230_display_setup_frame_info(lv_k230_display_instance_t* inst, lv_k230_display_buffer_t* buffer)
 {
     k_u32 layer_width  = inst->osd_layer_attr.img_size.width;
     k_u32 layer_height = inst->osd_layer_attr.img_size.height;
@@ -184,10 +198,12 @@ static void k230_display_setup_frame_info(lv_k230_display_intstance_t* inst, lv_
     }
     buffer->vf_info.v_frame.pixel_format = pixel_fmt;
     buffer->data_size                    = buffer->vf_info.v_frame.stride[0] * layer_height;
+    lv_draw_buf_init(&buffer->draw_buf, layer_width, layer_height, inst->color_format,
+                     buffer->vf_info.v_frame.stride[0], buffer->buffer_addr, buffer->buffer_size);
 }
 
 /* The rest of the functions remain the same... */
-static void k230_display_buffer_deinit(lv_k230_display_intstance_t* inst)
+static void k230_display_buffer_deinit(lv_k230_display_instance_t* inst)
 {
     int i;
 
@@ -220,11 +236,9 @@ static void k230_display_buffer_deinit(lv_k230_display_intstance_t* inst)
     }
 }
 
-/* Unified buffer configuration function */
-static int k230_display_configure_buffers(lv_k230_display_intstance_t* inst)
+static int k230_display_reconfigure(lv_k230_display_instance_t* inst, lv_color_format_t color_format)
 {
     int   i;
-    k_s32 ret;
 
     size_t buffer_size;
 
@@ -232,22 +246,16 @@ static int k230_display_configure_buffers(lv_k230_display_intstance_t* inst)
     k_u32 layer_width, layer_height;
     k_u32 draw_stride;
 
-    k_gdma_rotation_e layer_rotate;
-
-    lv_display_render_mode_t render_mode = LV_DISPLAY_RENDER_MODE_DIRECT;
-
     if (!inst) {
         return -1;
     }
 
     layer_width  = inst->osd_layer_attr.img_size.width;
     layer_height = inst->osd_layer_attr.img_size.height;
-    layer_rotate = inst->osd_layer_attr.func;
-
-    pixel_fmt_bpp = lv_k230_map_color_format_to_pixel_size(inst->color_format);
+    pixel_fmt_bpp = lv_k230_map_color_format_to_pixel_size(color_format);
 
     // Calculate buffer size and stride
-    draw_stride = lv_draw_buf_width_to_stride(layer_width, inst->color_format);
+    draw_stride = lv_draw_buf_width_to_stride(layer_width, color_format);
     if (draw_stride == 0) {
         draw_stride = layer_width * pixel_fmt_bpp;
     }
@@ -256,59 +264,82 @@ static int k230_display_configure_buffers(lv_k230_display_intstance_t* inst)
         return -1;
     }
 
-    // Destroy old VB pool if it exists
-    if (inst->buffer_pool_id != VB_INVALID_POOLID) {
-        k230_display_buffer_deinit(inst);
+    /* Keep the old buffers usable if allocation of the replacement fails. */
+    lv_k230_display_instance_t replacement = *inst;
+    replacement.color_format = color_format;
+    replacement.osd_layer_attr.pixel_format = lv_k230_map_color_format_to_pixel_format(color_format);
+    memset(replacement.buffer, 0, sizeof(replacement.buffer));
+    for (i = 0; i < inst->buffer_count; i++) {
+        replacement.buffer[i].block_handle = VB_INVALID_HANDLE;
     }
-
-    inst->buffer_cached = LV_USE_DRAW_VG_LITE ? false : true;
+    replacement.buffer_cached = !lv_k230_renderer_uses_vglite();
 
     // Create VB pool for display buffers
-    k_vb_remap_mode remap_mode = inst->buffer_cached ? VB_REMAP_MODE_CACHED : VB_REMAP_MODE_NOCACHE;
-    inst->buffer_pool_id = kd_mpi_vb_create_pool_ex(buffer_size, inst->buffer_count, remap_mode);
-    if (inst->buffer_pool_id == VB_INVALID_POOLID) {
+    k_vb_remap_mode remap_mode = replacement.buffer_cached ? VB_REMAP_MODE_CACHED : VB_REMAP_MODE_NOCACHE;
+    replacement.buffer_pool_id = kd_mpi_vb_create_pool_ex(buffer_size, inst->buffer_count, remap_mode);
+    if (replacement.buffer_pool_id == VB_INVALID_POOLID) {
         printf("Failed to create VB pool for display\n");
         return -1;
     }
 
-    // printf("Created VB pool %d with %d blocks of size %zu\n", inst->buffer_pool_id, inst->buffer_count, buffer_size);
-
     // Allocate buffers for LVGL
     for (i = 0; i < inst->buffer_count; i++) {
-        if (k230_display_allocate_single_buffer(inst, &inst->buffer[i], buffer_size) != 0) {
+        if (k230_display_allocate_single_buffer(&replacement, &replacement.buffer[i], buffer_size) != 0) {
             printf("Failed to allocate buffer %d\n", i);
-            // Clean up previously allocated buffers
-            for (int j = 0; j < i; j++) {
-                lv_k230_vglite_unregister_buffer(inst->buffer[j].buffer_addr);
-                kd_mpi_sys_munmap(inst->buffer[j].buffer_addr, buffer_size);
-                kd_mpi_vb_release_block(inst->buffer[j].block_handle);
-                inst->buffer[j].buffer_addr = NULL;
-                inst->buffer[j].block_handle = VB_INVALID_HANDLE;
-            }
-            kd_mpi_vb_destory_pool(inst->buffer_pool_id);
-            inst->buffer_pool_id = VB_INVALID_POOLID;
+            k230_display_buffer_deinit(&replacement);
             return -1;
         }
 
-        k230_display_setup_frame_info(inst, &inst->buffer[i]);
+        k230_display_setup_frame_info(&replacement, &replacement.buffer[i]);
     }
 
-    // Update LVGL display buffers
-    if ((GDMA_ROTATE_DEGREE_0 == layer_rotate) || (GDMA_ROTATE_DEGREE_180 == layer_rotate)) {
-        render_mode = LV_DISPLAY_RENDER_MODE_DIRECT;
-    } else if ((GDMA_ROTATE_DEGREE_90 == layer_rotate) || (GDMA_ROTATE_DEGREE_270 == layer_rotate)) {
-        render_mode = LV_DISPLAY_RENDER_MODE_FULL;
+    /* Keep the old allocation until VO accepts the replacement. Free the
+     * candidate before rollback so its memory is available for rotation. */
+    if (k230_display_configure_osd(&replacement) != 0) {
+        k230_display_buffer_deinit(&replacement);
+        if (inst->buffer_pool_id != VB_INVALID_POOLID) {
+            if (k230_display_configure_osd(inst) != 0) {
+                printf("Failed to restore OSD; display refresh paused\n");
+                inst->reconfigure_failed = true;
+                lv_timer_pause(lv_display_get_refr_timer(inst->lv_disp));
+            } else {
+                if (inst->last_buffer) {
+                    kd_display_layer_push_frame(inst->osd_layer_attr.layer_id, &inst->last_buffer->vf_info);
+                }
+                if (inst->reconfigure_failed) {
+                    lv_timer_resume(lv_display_get_refr_timer(inst->lv_disp));
+                    inst->reconfigure_failed = false;
+                }
+            }
+        }
+        return -1;
     }
+    if (inst->buffer_pool_id != VB_INVALID_POOLID) {
+        k230_display_buffer_deinit(inst);
+    }
+    inst->color_format = replacement.color_format;
+    inst->osd_layer_attr = replacement.osd_layer_attr;
+    inst->buffer_pool_id = replacement.buffer_pool_id;
+    inst->buffer_cached = replacement.buffer_cached;
+    memcpy(inst->buffer, replacement.buffer, sizeof(inst->buffer));
+    inst->last_buffer = NULL;
 
-    lv_display_set_buffers(inst->lv_disp, inst->buffer[0].buffer_addr, inst->buffer[1].buffer_addr, inst->buffer[0].buffer_size,
-                           render_mode);
+    /* The port chooses a free buffer each refresh. LVGL's built-in triple
+     * direct-mode sync also writes the other buffer, which VO may still own. */
+    lv_display_set_draw_buffers(inst->lv_disp, &inst->buffer[0].draw_buf, NULL);
+    lv_display_set_render_mode(inst->lv_disp, LV_DISPLAY_RENDER_MODE_DIRECT);
 
-    // printf("Successfully configured buffers\n");
+    inst->dirty_rows_valid          = false;
+    if (inst->reconfigure_failed) {
+        lv_timer_resume(lv_display_get_refr_timer(inst->lv_disp));
+        inst->reconfigure_failed = false;
+    }
+    lv_obj_invalidate(lv_display_get_screen_active(inst->lv_disp));
 
     return 0;
 }
 
-static k_s32 k230_display_configure_osd(lv_k230_display_intstance_t* inst)
+static k_s32 k230_display_configure_osd(lv_k230_display_instance_t* inst)
 {
     if (!inst) {
         return -1;
@@ -336,7 +367,7 @@ static k_s32 k230_display_configure_osd(lv_k230_display_intstance_t* inst)
 
 static uint32_t tick_get_cb(void) { return (uint32_t)utils_cpu_ticks_ms(); }
 
-static inline lv_k230_display_buffer_t* find_buffer_by_color_p(lv_k230_display_intstance_t* inst, uint8_t* color_p)
+static inline lv_k230_display_buffer_t* find_buffer_by_color_p(lv_k230_display_instance_t* inst, uint8_t* color_p)
 {
     for (int i = 0; i < inst->buffer_count; i++) {
         lv_k230_display_buffer_t* buff = &inst->buffer[i];
@@ -349,6 +380,85 @@ static inline lv_k230_display_buffer_t* find_buffer_by_color_p(lv_k230_display_i
     return NULL;
 }
 
+static void mark_dirty_rows(lv_k230_display_instance_t* inst, const lv_area_t* area)
+{
+    int32_t y1 = LV_MAX(area->y1, 0);
+    int32_t y2 = LV_MIN(area->y2, (int32_t)inst->osd_layer_attr.img_size.height - 1);
+
+    if (y1 > y2) {
+        return;
+    }
+
+    if (!inst->dirty_rows_valid) {
+        inst->dirty_y1         = y1;
+        inst->dirty_y2         = y2;
+        inst->dirty_rows_valid = true;
+        return;
+    }
+
+    inst->dirty_y1 = LV_MIN(inst->dirty_y1, y1);
+    inst->dirty_y2 = LV_MAX(inst->dirty_y2, y2);
+}
+
+static void flush_dirty_rows(lv_k230_display_instance_t* inst, lv_k230_display_buffer_t* buffer)
+{
+    if (!inst->dirty_rows_valid) {
+        return;
+    }
+
+    int32_t y1 = inst->dirty_y1;
+    int32_t y2 = inst->dirty_y2;
+
+    size_t stride = buffer->vf_info.v_frame.stride[0];
+    size_t offset = (size_t)y1 * stride;
+    size_t size   = (size_t)(y2 - y1 + 1) * stride;
+    kd_mpi_sys_mmz_flush_cache(buffer->vf_info.v_frame.phys_addr[0] + offset,
+                               (uint8_t*)buffer->buffer_addr + offset, size);
+
+}
+
+static void prepare_draw_buffer(lv_k230_display_instance_t* inst)
+{
+    lv_k230_display_buffer_t* next = NULL;
+
+    for (int i = 0; i < inst->buffer_count; i++) {
+        lv_k230_display_buffer_t* buffer = &inst->buffer[i];
+        if (buffer == inst->last_buffer) {
+            continue;
+        }
+        if (kd_mpi_vo_wait_frame_release(inst->osd_layer_attr.layer_id, &buffer->vf_info, 0) == 0) {
+            next = buffer;
+            break;
+        }
+    }
+
+    if (!next) {
+        next = inst->last_buffer == &inst->buffer[0] ? &inst->buffer[1] : &inst->buffer[0];
+        while (kd_mpi_vo_wait_frame_release(inst->osd_layer_attr.layer_id, &next->vf_info, -1) != 0) {
+            if (errno != EINTR) {
+                /* Continuing would let LVGL overwrite a buffer owned by VO. */
+                perror("VO frame release wait failed");
+                abort();
+            }
+        }
+    }
+
+    if (next->sync_rows_valid && inst->last_buffer) {
+        lv_area_t area = {0, next->sync_y1,
+                         (int32_t)inst->osd_layer_attr.img_size.width - 1, next->sync_y2};
+        lv_draw_buf_copy(&next->draw_buf, &area, &inst->last_buffer->draw_buf, &area);
+        if (inst->buffer_cached) {
+            size_t stride = next->vf_info.v_frame.stride[0];
+            size_t offset = (size_t)area.y1 * stride;
+            kd_mpi_sys_mmz_flush_cache(next->vf_info.v_frame.phys_addr[0] + offset,
+                                       (uint8_t*)next->buffer_addr + offset,
+                                       (size_t)(area.y2 - area.y1 + 1) * stride);
+        }
+        next->sync_rows_valid = false;
+    }
+    lv_display_set_draw_buffers(inst->lv_disp, &next->draw_buf, NULL);
+}
+
 static void flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* color_p)
 {
 #if LV_K230_DISPLAY_PRINT_FLUSH_FPS
@@ -357,7 +467,7 @@ static void flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* color_p
     uint64_t delta, current_ticks_ms;
 #endif
 
-    lv_k230_display_intstance_t* inst = lv_display_get_driver_data(disp);
+    lv_k230_display_instance_t* inst = lv_display_get_driver_data(disp);
 
     if (!inst) {
         lv_display_flush_ready(disp);
@@ -373,9 +483,20 @@ static void flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* color_p
         return;
     }
 
+    mark_dirty_rows(inst, area);
+
+    /*
+     * Direct mode can flush several invalid areas from the same draw buffer.
+     * Presenting before the last area exposes an incomplete framebuffer and
+     * leaves stale regions visible during the buffer swap.
+     */
+    if (!lv_display_flush_is_last(disp)) {
+        lv_display_flush_ready(disp);
+        return;
+    }
+
     if (inst->buffer_cached) {
-        kd_mpi_sys_mmz_flush_cache(current_buffer->vf_info.v_frame.phys_addr[0], current_buffer->buffer_addr,
-                                   current_buffer->data_size);
+        flush_dirty_rows(inst, current_buffer);
     }
 
     /*
@@ -391,6 +512,23 @@ static void flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* color_p
     if (kd_display_layer_push_frame(inst->osd_layer_attr.layer_id, &current_buffer->vf_info) != K_SUCCESS) {
         printf("Display push frame failed\n");
     }
+
+    /* Remember every change until each spare buffer catches up. The mailbox
+     * may drop frames, so a spare can be more than one refresh out of date. */
+    for (int i = 0; i < inst->buffer_count; i++) {
+        lv_k230_display_buffer_t* buffer = &inst->buffer[i];
+        if (buffer == current_buffer || !inst->dirty_rows_valid) continue;
+        if (buffer->sync_rows_valid) {
+            buffer->sync_y1 = LV_MIN(buffer->sync_y1, inst->dirty_y1);
+            buffer->sync_y2 = LV_MAX(buffer->sync_y2, inst->dirty_y2);
+        } else {
+            buffer->sync_y1 = inst->dirty_y1;
+            buffer->sync_y2 = inst->dirty_y2;
+            buffer->sync_rows_valid = true;
+        }
+    }
+    inst->last_buffer = current_buffer;
+    inst->dirty_rows_valid = false;
 
     lv_display_flush_ready(disp);
 
@@ -421,9 +559,18 @@ static void event_cb(lv_event_t* e)
 {
     lv_event_code_t              code    = lv_event_get_code(e);
     lv_display_t*                display = (lv_display_t*)lv_event_get_target(e);
-    lv_k230_display_intstance_t* inst    = lv_display_get_driver_data(display);
+    lv_k230_display_instance_t* inst    = lv_display_get_driver_data(display);
 
     switch (code) {
+    case LV_EVENT_REFR_REQUEST:
+        /* LVGL resumes the timer on invalidation, even after OSD rollback fails. */
+        if (inst && inst->reconfigure_failed) {
+            lv_timer_pause(lv_display_get_refr_timer(display));
+        }
+        break;
+    case LV_EVENT_RENDER_START:
+        if (inst) prepare_draw_buffer(inst);
+        break;
     case LV_EVENT_DELETE:
         if (inst) {
             // Disable OSD layer
@@ -442,74 +589,8 @@ static void event_cb(lv_event_t* e)
             }
         }
         break;
-    case LV_EVENT_RESOLUTION_CHANGED:
-        if (inst) {
-            k_vo_layer_id layer_id = inst->osd_layer_attr.layer_id;
-
-            k_u32 layer_width  = inst->osd_layer_attr.img_size.width;
-            k_u32 layer_height = inst->osd_layer_attr.img_size.height;
-
-            int32_t new_width  = lv_display_get_horizontal_resolution(display);
-            int32_t new_height = lv_display_get_vertical_resolution(display);
-
-            k_gdma_rotation_e new_rotate   = GDMA_ROTATE_NONE;
-            k_gdma_rotation_e layer_rotate = inst->osd_layer_attr.func;
-
-            lv_display_rotation_t lv_rot = lv_display_get_rotation(inst->lv_disp);
-
-            int32_t panel_width, panel_height;
-
-            if (0x00 != kd_display_get_resolution((k_u32*)&panel_width, (k_u32*)&panel_height)) {
-                printf("get disp resolution failed, skip update resolution\n");
-
-                break;
-            }
-
-            if ((panel_width == new_width) && (panel_height == new_height)) {
-                new_rotate = GDMA_ROTATE_NONE;
-
-                if (LV_DISPLAY_ROTATION_180 == lv_rot) {
-                    new_rotate = GDMA_ROTATE_DEGREE_180;
-                }
-            } else if ((panel_width == new_height) && (panel_height == new_width)) {
-                if (LV_DISPLAY_ROTATION_90 == lv_rot) {
-                    new_rotate = GDMA_ROTATE_DEGREE_270;
-                } else if (LV_DISPLAY_ROTATION_270 == lv_rot) {
-                    new_rotate = GDMA_ROTATE_DEGREE_90;
-                } else {
-                    printf("unsupport lvgl rotation\n");
-
-                    break;
-                }
-            } else {
-                printf("unsupport new resolution %dx%d vs %dx%d\n", new_width, new_height, panel_width, panel_height);
-
-                break;
-            }
-
-            printf("Resolution changed: %dx%d, rot %d\n", new_width, new_height, new_rotate);
-
-            if ((layer_width != new_width) || (layer_height != new_height) || (new_rotate != layer_rotate)) {
-                inst->osd_layer_attr.img_size.width  = new_width;
-                inst->osd_layer_attr.img_size.height = new_height;
-                inst->osd_layer_attr.func            = new_rotate;
-
-                if (k230_display_configure_buffers(inst) != 0) {
-                    printf("Failed to reconfigure buffers for new resolution\n");
-                    break;
-                }
-
-                if (k230_display_configure_osd(inst) != 0) {
-                    printf("Failed to reconfigure OSD for new resolution\n");
-                    break;
-                }
-            }
-        }
-        break;
     case LV_EVENT_COLOR_FORMAT_CHANGED:
         if (inst) {
-            k_vo_layer_id layer_id = inst->osd_layer_attr.layer_id;
-
             // Store old format for rollback
             lv_color_format_t old_color_format = inst->color_format;
             k_pixel_format    old_pixel_format = inst->osd_layer_attr.pixel_format;
@@ -531,7 +612,7 @@ static void event_cb(lv_event_t* e)
                 break;
             }
 
-            if (new_pixel_format == old_pixel_format) {
+            if (new_pixel_format == old_pixel_format && !inst->reconfigure_failed) {
                 inst->color_format = new_color_format;
                 for (int i = 0; i < inst->buffer_count; i++) {
                     k230_display_setup_frame_info(inst, &inst->buffer[i]);
@@ -541,28 +622,8 @@ static void event_cb(lv_event_t* e)
 
             printf("Reconfiguring display for new color format %d...\n", new_color_format);
 
-            // Update instance with new format temporarily
-            inst->color_format                = new_color_format;
-            inst->osd_layer_attr.pixel_format = new_pixel_format;
-
-            // Reconfigure buffers for new color format
-            if (k230_display_configure_buffers(inst) != 0) {
-                printf("Failed to reconfigure buffers for new color format\n");
-                // Rollback to old format
-                inst->color_format                = old_color_format;
-                inst->osd_layer_attr.pixel_format = old_pixel_format;
-
-                lv_display_set_color_format(display, old_color_format);
-                break;
-            }
-
-            // Reconfigure OSD for new color format
-            if (kd_display_layer_update_pixel_format(layer_id, new_pixel_format) != 0) {
-                printf("Failed to reconfigure OSD for new color format\n");
-                // Rollback: reconfigure buffers back to old format
-                inst->color_format                = old_color_format;
-                inst->osd_layer_attr.pixel_format = old_pixel_format;
-
+            if (k230_display_reconfigure(inst, new_color_format) != 0) {
+                printf("Failed to reconfigure display for new color format\n");
                 lv_display_set_color_format(display, old_color_format);
                 break;
             }
@@ -578,11 +639,9 @@ static void event_cb(lv_event_t* e)
 
 lv_display_t* lv_k230_display_create(k_vo_layer_id layer, uint8_t alpha)
 {
-    k_s32 ret;
-
     k_pixel_format osd_layer_pixel_fmt;
 
-    k_u32 panel_width, panel_height;
+    k_u32 display_width, display_height;
 
     if ((K_VO_LAYER_OSD0 > layer) || (K_MAX_VO_LAYER_NR <= layer)) {
         printf("invalid layer, only support osd layers\n");
@@ -590,23 +649,25 @@ lv_display_t* lv_k230_display_create(k_vo_layer_id layer, uint8_t alpha)
         goto _invalid_osd_layer;
     }
 
-    if (0x00 != kd_display_get_resolution(&panel_width, &panel_height)) {
-        printf("get panel resolution failed\n");
+    if (0x00 != kd_display_get_resolution(&display_width, &display_height)) {
+        printf("get display resolution failed\n");
 
         goto _failed_get_resolution;
     }
 
-    lv_k230_display_intstance_t* inst = lv_malloc_zeroed(sizeof(lv_k230_display_intstance_t));
-    lv_display_t*                disp = lv_display_create(panel_width, panel_height);
-    LV_ASSERT_MALLOC(inst || disp);
+    lv_k230_display_instance_t* inst = lv_malloc_zeroed(sizeof(lv_k230_display_instance_t));
+    lv_display_t*                disp = lv_display_create(display_width, display_height);
+    LV_ASSERT_MALLOC(inst && disp);
     if ((NULL == inst) || (NULL == disp)) {
         goto _failed_malloc;
     }
 
-    inst->buffer_count   = 2;
+    inst->buffer_count   = 3;
     inst->buffer_pool_id = VB_INVALID_POOLID; /* Will be created internally */
+    for (int i = 0; i < inst->buffer_count; i++) {
+        inst->buffer[i].block_handle = VB_INVALID_HANDLE;
+    }
 
-    /* Initialize rotation state */
     inst->lv_disp = disp;
 
     inst->color_format  = lv_display_get_color_format(disp);
@@ -622,21 +683,28 @@ lv_display_t* lv_k230_display_create(k_vo_layer_id layer, uint8_t alpha)
     inst->osd_layer_attr.layer_id        = layer;
     inst->osd_layer_attr.position.x      = 0;
     inst->osd_layer_attr.position.y      = 0;
-    inst->osd_layer_attr.img_size.width  = panel_width;
-    inst->osd_layer_attr.img_size.height = panel_height;
+    inst->osd_layer_attr.img_size.width  = display_width;
+    inst->osd_layer_attr.img_size.height = display_height;
     inst->osd_layer_attr.pixel_format    = osd_layer_pixel_fmt;
     inst->osd_layer_attr.global_alpha    = alpha;
-    inst->osd_layer_attr.func            = 0; // default no rotate.
+    /* VO inherits the device rotation selected by kd_display_init(). */
+    inst->osd_layer_attr.func            = GDMA_ROTATE_NONE;
     inst->osd_layer_attr.rot_buf_nr      = 2;
-    inst->osd_layer_attr.rot_buf_bpp     = 4; // we need support user dynamic update pixelformat
+    inst->osd_layer_attr.rot_buf_bpp     = 4; // Allow dynamic switching up to 4-byte pixel formats.
 
-    if (0x00 != k230_display_configure_buffers(inst)) {
-        printf("Buffer init failed\n");
+    if (0x00 != k230_display_reconfigure(inst, inst->color_format)) {
+        printf("Display init failed\n");
         goto _failed_buffer_init;
     }
 
-    if (0x00 != k230_display_configure_osd(inst)) {
-        printf("OSD init failed\n");
+    int release_result;
+    do {
+        release_result = kd_mpi_vo_wait_frame_release(layer, &inst->buffer[0].vf_info, 0);
+    } while (release_result != 0 && errno == EINTR);
+    /* EBUSY also confirms support: another VO operation may hold the lock. */
+    if (release_result != 0 && errno != EBUSY) {
+        printf("VO frame-release notification is unavailable\n");
+        kd_display_layer_disable(layer);
         goto _failed_osd_init;
     }
 
@@ -644,9 +712,10 @@ lv_display_t* lv_k230_display_create(k_vo_layer_id layer, uint8_t alpha)
 
     lv_display_set_flush_cb(disp, flush_cb);
 
-    lv_display_add_event_cb(disp, event_cb, LV_EVENT_RESOLUTION_CHANGED, NULL);
     lv_display_add_event_cb(disp, event_cb, LV_EVENT_COLOR_FORMAT_CHANGED, NULL);
     lv_display_add_event_cb(disp, event_cb, LV_EVENT_DELETE, NULL);
+    lv_display_add_event_cb(disp, event_cb, LV_EVENT_RENDER_START, NULL);
+    lv_display_add_event_cb(disp, event_cb, LV_EVENT_REFR_REQUEST, NULL);
 
     lv_tick_set_cb(tick_get_cb);
 
@@ -654,15 +723,16 @@ lv_display_t* lv_k230_display_create(k_vo_layer_id layer, uint8_t alpha)
     return disp;
 
 _failed_osd_init:
-_failed_dma_init:
     k230_display_buffer_deinit(inst);
 _failed_buffer_init:
 _failed_map_color_format:
+_failed_malloc:
+    if (disp) {
+        lv_display_delete(disp);
+    }
     if (inst) {
         lv_free(inst);
     }
-_failed_malloc:
-_invalid_resolution:
 _failed_get_resolution:
 _invalid_osd_layer:
 

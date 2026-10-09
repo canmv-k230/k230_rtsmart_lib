@@ -10,9 +10,32 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "k_video_comm.h"
 #include "k_type.h"
+
+typedef enum {
+    LV_K230_RENDERER_SW,
+    LV_K230_RENDERER_RVV,
+    LV_K230_RENDERER_VGLITE,
+} lv_k230_renderer_t;
+
+typedef struct {
+    uint64_t rvv_tasks;
+    uint64_t rvv_pixels;
+    uint64_t vglite_tasks;
+    uint64_t vglite_pixels;
+} lv_k230_renderer_stats_t;
+
+/* Select the renderer before lv_init() and lv_k230_display_create(). */
+bool lv_k230_renderer_set(lv_k230_renderer_t renderer);
+bool lv_k230_renderer_rvv_enabled(void);
+bool lv_k230_renderer_uses_vglite(void);
+void lv_k230_renderer_reset_stats(void);
+void lv_k230_renderer_get_stats(lv_k230_renderer_stats_t * stats);
+void lv_k230_renderer_note_rvv(uint64_t pixels);
+bool lv_k230_renderer_rvv_self_test(void);
 
 void lv_k230_vglite_register_buffer(void * virt, k_u64 phys, size_t size, bool cached);
 void lv_k230_vglite_register_mpp_buffer(void * virt, k_u64 phys, size_t size, bool cached,

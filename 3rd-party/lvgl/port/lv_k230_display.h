@@ -34,6 +34,14 @@ extern "C" {
 
 #include "kd_display.h"
 
+/**
+ * Create an LVGL display for an initialized K230 display device.
+ *
+ * Configure connector rotation with kd_display_init() before calling this
+ * function. The VO framework reports the resulting logical resolution and
+ * owns any GDMA rotation buffers needed by the layer. Do not use
+ * lv_display_set_rotation() with this port.
+ */
 lv_display_t* lv_k230_display_create(k_vo_layer_id layer, uint8_t alpha);
 
 #ifdef __cplusplus

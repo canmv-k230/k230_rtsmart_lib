@@ -25,6 +25,7 @@
 #define DECODE_BUFFER_COUNT 3u
 #define CSC_MIN_PIXELS (64u * 64u)
 #define CSC_TIMEOUT_MS 1000
+#define SDMA_COPY_MIN_BYTES (64u * 1024u)
 
 typedef struct {
     k_u64 phys;
@@ -697,6 +698,66 @@ static bool copy_same_yuv(lv_draw_buf_t * dest, const lv_area_t * dest_area,
     return true;
 }
 
+static bool copy_same_format_sdma(lv_draw_buf_t * dest, const lv_area_t * dest_area,
+                                  const lv_draw_buf_t * src, const lv_area_t * src_area,
+                                  uint32_t line_bytes, uint32_t height)
+{
+    if(!dest_area || !src_area || dest->header.w != src->header.w ||
+       dest->header.h != src->header.h || dest->header.stride != src->header.stride ||
+       dest_area->x1 != src_area->x1 || dest_area->y1 != src_area->y1 ||
+       dest_area->x2 != src_area->x2 || dest_area->y2 != src_area->y2) {
+        return false;
+    }
+
+    /* A linear transfer must not include pixels between clipped rows. */
+    if(height > 1u && line_bytes != dest->header.stride) {
+        return false;
+    }
+
+    uint8_t * dest_start = lv_draw_buf_goto_xy(dest, dest_area->x1, dest_area->y1);
+    const uint8_t * src_start = lv_draw_buf_goto_xy(src, src_area->x1, src_area->y1);
+    uint64_t bytes = (uint64_t)(height - 1u) * dest->header.stride + line_bytes;
+    if(bytes < SDMA_COPY_MIN_BYTES || bytes > SIZE_MAX) {
+        return false;
+    }
+
+    k_u64 dest_phys;
+    k_u64 src_phys;
+    if(!lv_k230_vglite_get_buffer_phys(dest_start, (size_t)bytes, &dest_phys) ||
+       !lv_k230_vglite_get_buffer_phys(src_start, (size_t)bytes, &src_phys)) {
+        return false;
+    }
+
+    lv_draw_buf_flush_cache(src, src_area);
+    lv_draw_buf_flush_cache(dest, dest_area);
+    lv_draw_buf_invalidate_cache(dest, dest_area);
+
+    pthread_mutex_lock(&s_converter_lock);
+    if(!s_gsdma_inited && kd_mpi_gsdma_init() == K_SUCCESS) {
+        s_gsdma_inited = true;
+    }
+
+    k_s32 result = K_FAILED;
+    if(s_gsdma_inited) {
+        k_sdma_memcpy_t dma = {
+            .dst_phys_addr = dest_phys,
+            .src_phys_addr = src_phys,
+            .size = bytes,
+            .timeout_ms = CSC_TIMEOUT_MS,
+        };
+        result = kd_mpi_gsdma_sdma_memcpy(&dma);
+    }
+    pthread_mutex_unlock(&s_converter_lock);
+
+    if(result != K_SUCCESS) {
+        return false;
+    }
+
+    lv_draw_buf_invalidate_cache(dest, dest_area);
+    s_last_backend = "SDMA";
+    return true;
+}
+
 static void copy_same_format(lv_draw_buf_t * dest, const lv_area_t * dest_area,
                              const lv_draw_buf_t * src, const lv_area_t * src_area,
                              uint32_t width, uint32_t height)
@@ -717,6 +778,10 @@ static void copy_same_format(lv_draw_buf_t * dest, const lv_area_t * dest_area,
                                                    src_area ? src_area->x1 : 0,
                                                    src_area ? src_area->y1 : 0);
     uint32_t line_bytes = (width * lv_color_format_get_bpp(dest->header.cf) + 7u) >> 3;
+
+    if(copy_same_format_sdma(dest, dest_area, src, src_area, line_bytes, height)) {
+        return;
+    }
 
     for(uint32_t y = 0; y < height; y++) {
         memcpy(dest_line, src_line, line_bytes);

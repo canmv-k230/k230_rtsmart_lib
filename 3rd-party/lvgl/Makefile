@@ -43,7 +43,7 @@ CWARN :=
 # CWARN += -Wno-int-conversion
 
 C_CXX_FLAGS := -Iport -I$(LVGL_PATH) -I$(SDK_SRC_ROOT_DIR)/include
-C_CXX_FLAGS += -fopenmp -march=rv64imafdcv -mabi=lp64d -mcmodel=medany -Os $(CWARN) $(LIB_CFLAGS)
+C_CXX_FLAGS += -fopenmp -march=rv64imafdcv -mabi=lp64d -mcmodel=medany -O3 -fno-math-errno $(CWARN) $(LIB_CFLAGS)
 
 ifeq ($(CONFIG_RTSMART_3RD_PARTY_ENABLE_FREETYPE),y)
 C_CXX_FLAGS += -I$(SDK_RTSMART_BUILD_DIR)/libs/3rd-party/include/freetype
