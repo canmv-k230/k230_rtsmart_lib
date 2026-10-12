@@ -60,6 +60,7 @@ struct rt_pwm_configuration {
 
 static int _drv_pwm_fd      = -1;
 static int _drv_pwm_ref_cnt = 0;
+static uint8_t _drv_pwm_enabled[6];
 
 static int pwm_ioctl(int cmd, void* arg)
 {
@@ -103,6 +104,11 @@ int drv_pwm_set_freq(int channel, uint32_t freq)
 {
     PWM_CHECK_CHANNEL(channel);
 
+    if (freq == 0 || freq > NSEC_PER_SEC) {
+        printf("[hal_pwm]: invalid frequency %u\n", freq);
+        return -1;
+    }
+
     struct rt_pwm_configuration cfg;
 
     uint32_t old_period, old_pulse;
@@ -114,6 +120,11 @@ int drv_pwm_set_freq(int channel, uint32_t freq)
     // Set target period (in ns)
     cfg.channel = channel;
     cfg.period  = NSEC_PER_SEC / freq;
+
+    if (cfg.period == 0) {
+        printf("[hal_pwm]: frequency %u produces a zero period\n", freq);
+        return -1;
+    }
 
     // Preserve original duty ratio using 64-bit math
     cfg.pulse = (old_pulse && old_period) ? (uint64_t)cfg.period * old_pulse / old_period : 0;
@@ -135,6 +146,11 @@ int drv_pwm_get_freq(int channel, uint32_t* freq)
 
     uint32_t period;
     if (0 != drv_pwm_get_cfg(channel, &period, NULL)) {
+        return -1;
+    }
+
+    if (period == 0) {
+        printf("[hal_pwm]: set frequency before duty cycle\n");
         return -1;
     }
 
@@ -261,9 +277,10 @@ int drv_pwm_set_duty_ns(int channel, uint32_t pulse_ns)
         return -1; // Failed to get period
     }
 
-    // Validate pulse_ns ≤ period
+    // Validate pulse_ns <= period
     if (pulse_ns > period) {
-        pulse_ns = period; // Clamp to period if exceeds
+        printf("[hal_pwm]: pulse width must not exceed period\n");
+        return -1;
     }
 
     // Apply settings
@@ -312,7 +329,10 @@ int drv_pwm_enable(int channel)
         return -1;
     }
 
-    _drv_pwm_ref_cnt++;
+    if (!_drv_pwm_enabled[channel]) {
+        _drv_pwm_enabled[channel] = 1;
+        _drv_pwm_ref_cnt++;
+    }
     return 0;
 }
 
@@ -327,11 +347,13 @@ int drv_pwm_disable(int channel)
         return -1;
     }
 
-    _drv_pwm_ref_cnt--;
-    if (_drv_pwm_ref_cnt <= 0) {
+    if (_drv_pwm_enabled[channel]) {
+        _drv_pwm_enabled[channel] = 0;
+        _drv_pwm_ref_cnt--;
+    }
+    if (_drv_pwm_ref_cnt == 0) {
         close(_drv_pwm_fd);
         _drv_pwm_fd      = -1;
-        _drv_pwm_ref_cnt = 0;
     }
     return 0;
 }
@@ -352,9 +374,16 @@ int drv_pwm_init(void)
 int drv_pwm_deinit(void)
 {
     if (_drv_pwm_fd >= 0) {
+        for (int channel = 0; channel < 6; channel++) {
+            if (_drv_pwm_enabled[channel]) {
+                struct rt_pwm_configuration cfg = { .channel = channel };
+                (void)pwm_ioctl(KD_PWM_CMD_DISABLE, &cfg);
+            }
+        }
         close(_drv_pwm_fd);
         _drv_pwm_fd      = -1;
         _drv_pwm_ref_cnt = 0;
+        memset(_drv_pwm_enabled, 0, sizeof(_drv_pwm_enabled));
     }
     return 0;
 }

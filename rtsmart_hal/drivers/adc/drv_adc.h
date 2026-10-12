@@ -36,12 +36,14 @@ extern "C" {
 #define DRV_ADC_MAX_CHANNEL    (6)
 #define DRV_ADC_RESOLUTION     (4096 - 1) // K230 ADC 12 bit
 #define DRV_ADC_DEFAULT_REF_UV (1800000) // Default ADC_VREF 1.8V
+#define DRV_ADC_INVALID_VALUE  UINT32_MAX
 
-int drv_adc_init();
-int drv_adc_deinit();
+int drv_adc_init(void);
+int drv_adc_deinit(void);
 
 uint32_t drv_adc_read(int channel);
 uint32_t drv_adc_read_uv(int channel, uint32_t ref_uv);
+int drv_adc_raw_to_uv(uint32_t raw, uint32_t ref_uv, uint32_t* uv);
 
 #ifdef __cplusplus
 }

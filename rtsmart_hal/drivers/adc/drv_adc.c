@@ -52,26 +52,38 @@ static int drv_adc_chn_state[DRV_ADC_MAX_CHANNEL] = {
 
 static pthread_spinlock_t _drv_adc_lock = (pthread_spinlock_t)0;
 
-int drv_adc_init()
+int drv_adc_init(void)
 {
     if (0x00 > _drv_adc_fd) {
         if (0x00 > (_drv_adc_fd = open(DRV_ADC_DEV, O_RDWR))) {
             printf("[hal_adc]: open device failed\n");
             return -1;
         }
-        pthread_spin_init(&_drv_adc_lock, 0);
+        if (pthread_spin_init(&_drv_adc_lock, 0) != 0) {
+            printf("[hal_adc]: initialize lock failed\n");
+            close(_drv_adc_fd);
+            _drv_adc_fd = -1;
+            return -1;
+        }
     }
     _drv_adc_ref_cnt++;
 
     return 0;
 }
 
-int drv_adc_deinit()
+int drv_adc_deinit(void)
 {
-    if (0x00 > _drv_adc_fd) {
-        _drv_adc_ref_cnt--;
+    if (_drv_adc_fd >= 0) {
+        if (_drv_adc_ref_cnt > 0) {
+            _drv_adc_ref_cnt--;
+        }
 
-        if (0x00 == _drv_adc_ref_cnt) {
+        if (_drv_adc_ref_cnt == 0) {
+            for (int channel = 0; channel < DRV_ADC_MAX_CHANNEL; channel++) {
+                if (drv_adc_chn_state[channel]) {
+                    (void)ioctl(_drv_adc_fd, RT_ADC_CMD_DISABLE, channel);
+                }
+            }
             close(_drv_adc_fd);
             _drv_adc_fd = -1;
 
@@ -86,16 +98,17 @@ int drv_adc_deinit()
 
 uint32_t drv_adc_read(int channel)
 {
-    uint32_t value;
+    uint32_t value = 0;
+    ssize_t read_size;
 
     if (0x00 > _drv_adc_fd) {
         printf("[hal_adc]: not inited\n");
-        return __UINT32_MAX__;
+        return DRV_ADC_INVALID_VALUE;
     }
 
-    if (DRV_ADC_MAX_CHANNEL <= channel) {
+    if (channel < 0 || DRV_ADC_MAX_CHANNEL <= channel) {
         printf("[hal_adc]: invalid channel %d\n", channel);
-        return __UINT32_MAX__;
+        return DRV_ADC_INVALID_VALUE;
     }
 
     pthread_spin_lock(&_drv_adc_lock);
@@ -105,17 +118,24 @@ uint32_t drv_adc_read(int channel)
             printf("[hal_adc]: enable channel failed\n");
 
             pthread_spin_unlock(&_drv_adc_lock);
-            return __UINT32_MAX__;
+            return DRV_ADC_INVALID_VALUE;
         }
         drv_adc_chn_state[channel] = 1;
     }
 
-    lseek(_drv_adc_fd, channel, SEEK_SET);
-    if (0x00 == read(_drv_adc_fd, &value, sizeof(value))) {
+    if (lseek(_drv_adc_fd, channel, SEEK_SET) < 0) {
+        printf("[hal_adc]: select channel failed\n");
+
+        pthread_spin_unlock(&_drv_adc_lock);
+        return DRV_ADC_INVALID_VALUE;
+    }
+
+    read_size = read(_drv_adc_fd, &value, sizeof(value));
+    if (read_size != (ssize_t)sizeof(value)) {
         printf("[hal_adc]: read channel failed\n");
 
         pthread_spin_unlock(&_drv_adc_lock);
-        return __UINT32_MAX__;
+        return DRV_ADC_INVALID_VALUE;
     }
 
     pthread_spin_unlock(&_drv_adc_lock);
@@ -123,23 +143,26 @@ uint32_t drv_adc_read(int channel)
     return value;
 }
 
-uint32_t drv_adc_read_uv(int channel, uint32_t ref_uv)
+int drv_adc_raw_to_uv(uint32_t raw, uint32_t ref_uv, uint32_t* uv)
 {
-    uint32_t read, result;
-    uint64_t read_u64, ref_u64;
-
-    read = drv_adc_read(channel);
-
-    if (read == __UINT32_MAX__) {
-        return __UINT32_MAX__; // Error reading ADC
+    if (raw > DRV_ADC_RESOLUTION || ref_uv == 0 || uv == NULL) {
+        return -1;
     }
 
-    read_u64 = (uint64_t)read;
-    ref_u64  = (uint64_t)ref_uv;
+    *uv = (uint32_t)(((uint64_t)raw * ref_uv + DRV_ADC_RESOLUTION / 2)
+                     / DRV_ADC_RESOLUTION);
+    return 0;
+}
 
-    // Convert to microvolts:
-    // 1. Multiply by reference voltage in μV
-    // 2. Divide by full scale (4095 for 12-bit)
-    // 3. Add 0.5 before division for proper rounding
-    return (uint32_t)((read_u64 * ref_u64 + 2047) / DRV_ADC_RESOLUTION);
+uint32_t drv_adc_read_uv(int channel, uint32_t ref_uv)
+{
+    uint32_t raw = drv_adc_read(channel);
+    uint32_t uv;
+
+    if (raw == DRV_ADC_INVALID_VALUE
+        || drv_adc_raw_to_uv(raw, ref_uv, &uv) != 0) {
+        return DRV_ADC_INVALID_VALUE;
+    }
+
+    return uv;
 }

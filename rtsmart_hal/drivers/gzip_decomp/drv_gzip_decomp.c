@@ -43,6 +43,17 @@
 #define DRV_GZIP_DECOMP_DEFAULT_SRC_SIZE (256 * 1024)
 #define DRV_GZIP_DECOMP_DEFAULT_DST_SIZE (1 * 1024 * 1024)
 
+/* The UGZIP engine exchanges data with SDMA in 128KB linked-list nodes; the
+ * last node of a transfer still spans a full 128KB, so DMA may touch up to
+ * one node beyond the payload. Buffers handed to the engine must be padded
+ * to this granularity. */
+#define DRV_GZIP_DECOMP_NODE_SIZE (128 * 1024)
+
+static uint32_t _drv_gzip_decomp_align_node(uint32_t size)
+{
+    return (size + DRV_GZIP_DECOMP_NODE_SIZE - 1) & ~(uint32_t)(DRV_GZIP_DECOMP_NODE_SIZE - 1);
+}
+
 struct rt_gzip_decomp_args {
     uint64_t src_phys;
     uint32_t src_len;
@@ -93,26 +104,131 @@ static int _drv_gzip_decomp_resize_buffer(uint64_t *phy_addr, void **virt_addr,
     return 0;
 }
 
+/*
+ * K230 UGZIP hardware stream requirements (see U-Boot lib/k230_gunzip.c and
+ * TRM chapter 15 "Decompress Engine"):
+ *  - The engine parses a standard gzip stream, so the method byte (CM) must
+ *    be 0x08. The 0x09 method byte found in K230 firmware images is only a
+ *    software marker meaning "produced by k230_priv_gzip for hardware
+ *    decompression"; U-Boot restores it to 0x08 before starting the engine
+ *    and this HAL does the same.
+ *  - The engine expects the fixed 10-byte header. Optional fields
+ *    (FEXTRA/FNAME/FCOMMENT/FHCRC) are stripped in software below.
+ *  - Only dynamic-Huffman deflate blocks are supported. Streams produced by
+ *    the stock gzip tool may contain stored or static-Huffman blocks and are
+ *    NOT guaranteed to decompress; compress with
+ *    tools/image_tools/k230_priv_gzip.py instead.
+ */
 static int _drv_gzip_decomp_validate_header(const void *src, uint32_t src_len)
 {
     const uint8_t *header = (const uint8_t *)src;
 
-    if (!src || src_len < 10) {
-        printf("[hal_gzip_decomp]: input too short for gzip header (need >= 10 bytes)\n");
-        return -1;
+    /* 10-byte header + 8-byte trailer (CRC32 + ISIZE) */
+    if (!src || src_len < 18) {
+        printf("[hal_gzip_decomp]: input too short for gzip stream (need >= 18 bytes)\n");
+        return -EINVAL;
     }
 
     if (header[0] != 0x1f || header[1] != 0x8b) {
         printf("[hal_gzip_decomp]: bad gzip magic: %02x %02x\n", header[0], header[1]);
-        return -1;
+        return -EINVAL;
     }
 
-    if (header[2] != 0x08 && header[2] != 0x09) {
-        printf("[hal_gzip_decomp]: unsupported gzip method 0x%02x (expect 0x08 or 0x09)\n", header[2]);
-        return -1;
+    if (header[2] != 0x09) {
+        if (header[2] == 0x08) {
+            printf("[hal_gzip_decomp]: standard gzip is not marked as hardware-compatible; "
+                   "compress with K230PrivGzip\n");
+        } else {
+            printf("[hal_gzip_decomp]: unsupported gzip method 0x%02x\n", header[2]);
+        }
+        return -ENOTSUP;
+    }
+
+    if ((header[3] & 0xe0) != 0) {
+        printf("[hal_gzip_decomp]: invalid gzip flags 0x%02x\n", header[3]);
+        return -EINVAL;
     }
 
     return 0;
+}
+
+static uint32_t _drv_gzip_decomp_get_le32(const uint8_t *data)
+{
+    return (uint32_t)data[0] | ((uint32_t)data[1] << 8) |
+           ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+}
+
+static int _drv_gzip_decomp_validate_empty_stream(const uint8_t *stream,
+                                                   uint32_t stream_len)
+{
+    static const uint8_t empty_tail[] = {
+        0x05, 0xc1, 0x81, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x10, 0xff, 0xd5, 0x08, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    };
+
+    /* K230PrivGzip levels 4-9 emit this dynamic-Huffman empty stream. Empty
+     * output cannot use the hardware write-completion path, so authenticate
+     * its complete deflate payload and trailer in software. */
+    if (stream_len != 10 + sizeof(empty_tail) ||
+        memcmp(stream + 10, empty_tail, sizeof(empty_tail)) != 0) {
+        printf("[hal_gzip_decomp]: invalid hardware-compatible empty stream\n");
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
+/*
+ * Strip optional gzip header fields so the hardware sees the fixed 10-byte
+ * header immediately followed by the deflate stream. Returns the new stream
+ * length, or 0 if the header is malformed.
+ */
+static uint32_t _drv_gzip_decomp_strip_header_extras(uint8_t *buf, uint32_t len)
+{
+    uint8_t flg = buf[3];
+    uint32_t off = 10;
+
+    if (flg == 0)
+        return len;
+
+    if (flg & 0x04) { /* FEXTRA */
+        uint32_t xlen;
+
+        if (len - off < 2)
+            return 0;
+        xlen = (uint32_t)(buf[off] | (buf[off + 1] << 8));
+        off += 2;
+        if (xlen > len - off)
+            return 0;
+        off += xlen;
+    }
+    if (flg & 0x08) { /* FNAME */
+        while (off < len && buf[off] != 0)
+            off++;
+        if (off == len)
+            return 0;
+        off++;
+    }
+    if (flg & 0x10) { /* FCOMMENT */
+        while (off < len && buf[off] != 0)
+            off++;
+        if (off == len)
+            return 0;
+        off++;
+    }
+    if (flg & 0x02) { /* FHCRC */
+        if (len - off < 2)
+            return 0;
+        off += 2;
+    }
+
+    if (len - off < 8)
+        return 0;
+
+    buf[3] = 0;
+    memmove(buf + 10, buf + off, len - off);
+    return 10 + (len - off);
 }
 
 int drv_gzip_decomp_open(drv_gzip_decomp_inst_t **inst)
@@ -244,6 +360,9 @@ int drv_gzip_decomp_gunzip(drv_gzip_decomp_inst_t *inst,
                            void *dst, uint32_t dst_len,
                            int32_t timeout_ms)
 {
+    uint8_t *hdr;
+    uint32_t src_dma_size;
+    uint32_t dst_dma_size;
     int ret;
 
     if (inst == NULL || inst->fd < 0) {
@@ -255,25 +374,57 @@ int drv_gzip_decomp_gunzip(drv_gzip_decomp_inst_t *inst,
     if (ret != 0)
         return ret;
 
-    if (src_len > inst->src_alloc_size) {
-        ret = drv_gzip_decomp_set_src_alloc_size(inst, src_len);
+    if (_drv_gzip_decomp_get_le32((const uint8_t *)src + src_len - 4) != dst_len) {
+        printf("[hal_gzip_decomp]: gzip output size does not match destination (%u)\n", dst_len);
+        return -EINVAL;
+    }
+    if (dst_len != 0 && dst == NULL) {
+        printf("[hal_gzip_decomp]: destination is null for non-empty output\n");
+        return -EINVAL;
+    }
+
+    src_dma_size = _drv_gzip_decomp_align_node(src_len);
+    if (src_dma_size < src_len)
+        return -EOVERFLOW;
+
+    /* Pad allocations to the 128KB DMA node size: the engine's SDMA chains
+     * always transfer whole nodes, so the last node may read/write up to
+     * 128KB past the payload. */
+    if (src_dma_size > inst->src_alloc_size) {
+        ret = drv_gzip_decomp_set_src_alloc_size(inst, src_dma_size);
         if (ret != 0)
             return ret;
     }
 
-    if (dst_len > inst->dst_alloc_size) {
-        ret = drv_gzip_decomp_set_dst_alloc_size(inst, dst_len);
-        if (ret != 0)
-            return ret;
-    }
-
+    memset(inst->src_virt, 0, src_dma_size);
     hal_rvv_memcpy(inst->src_virt, src, src_len);
+    hdr = (uint8_t *)inst->src_virt;
 
-    /* Auto-patch standard gzip (method=0x08) to K230 private format (0x09) */
-    if (((uint8_t *)inst->src_virt)[2] == 0x08)
-        ((uint8_t *)inst->src_virt)[2] = 0x09;
+    /* The 0x09 byte is a software marker. The hardware expects DEFLATE (0x08). */
+    hdr[2] = 0x08;
 
-    kd_mpi_sys_mmz_flush_cache(inst->src_phy, inst->src_virt, src_len);
+    /* Hardware expects the fixed 10-byte header: drop FNAME etc. */
+    src_len = _drv_gzip_decomp_strip_header_extras(hdr, src_len);
+    if (src_len == 0) {
+        printf("[hal_gzip_decomp]: malformed gzip header (bad optional fields)\n");
+        return -EINVAL;
+    }
+
+    memset(hdr + src_len, 0, src_dma_size - src_len);
+
+    if (dst_len == 0)
+        return _drv_gzip_decomp_validate_empty_stream(hdr, src_len);
+
+    dst_dma_size = _drv_gzip_decomp_align_node(dst_len);
+    if (dst_dma_size < dst_len)
+        return -EOVERFLOW;
+    if (dst_dma_size > inst->dst_alloc_size) {
+        ret = drv_gzip_decomp_set_dst_alloc_size(inst, dst_dma_size);
+        if (ret != 0)
+            return ret;
+    }
+
+    kd_mpi_sys_mmz_flush_cache(inst->src_phy, inst->src_virt, src_dma_size);
 
     ret = drv_gzip_decomp_gunzip_phys(inst, inst->src_phy, src_len,
                                       inst->dst_phy, dst_len, timeout_ms);

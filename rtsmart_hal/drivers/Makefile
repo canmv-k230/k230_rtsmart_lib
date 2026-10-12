@@ -4,6 +4,7 @@ subdirs-y := \
 	fpioa \
 	gpio \
 	pmu \
+	pm \
 	input \
 	timer \
 	sbus \

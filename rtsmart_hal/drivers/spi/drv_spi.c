@@ -25,6 +25,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <limits.h>
 #include <sys/ioctl.h>
 #include <string.h>
 #include <stdio.h>
@@ -102,6 +103,11 @@ int drv_spi_inst_create(int spi_id, bool active_low, int mode, uint32_t baudrate
         goto err_0;
     }
 
+    if (baudrate == 0) {
+        printf("[hal_spi]: baudrate must be greater than zero\n");
+        goto err_0;
+    }
+
     if (data_bits < 4 || data_bits > 32) {
         printf("[hal_spi]: invalid data bits, range in [4 ~ 32]\n");
         goto err_0;
@@ -125,9 +131,10 @@ int drv_spi_inst_create(int spi_id, bool active_low, int mode, uint32_t baudrate
     }
 
     if (inst == NULL) {
-        printf("[hal_spi]: NULL poionter unsupport\n");
+        printf("[hal_spi]: NULL output pointer\n");
         goto err_0;
     }
+    *inst = NULL;
 
     *inst = malloc(sizeof(struct drv_spi_inst));
     if (!(*inst)) {
@@ -214,6 +221,7 @@ err_2:
     }
 err_1:
     free(*inst);
+    *inst = NULL;
 err_0:
 
     return ret;
@@ -233,6 +241,7 @@ void drv_spi_inst_destroy(drv_spi_inst_t *inst)
                 close((*inst)->dev_fd);
             }
             free((*inst));
+            *inst = NULL;
         }
     }
 }
@@ -252,7 +261,12 @@ int drv_spi_transfer(drv_spi_inst_t inst, const void *tx_data,
     }
 
     if (len == 0) {
-        printf("[hal_spi]: zero len\n");
+        goto out;
+    }
+
+    if (len > INT_MAX || (tx_data == NULL && rx_data == NULL)) {
+        printf("[hal_spi]: invalid transfer buffer or length\n");
+        ret = -1;
         goto out;
     }
 
@@ -336,7 +350,7 @@ int drv_spi_transfer_message(drv_spi_inst_t inst, struct rt_qspi_message *msg)
     int ret;
     int cs_pin;
 
-    if (!inst || inst->dev_fd < 0) {
+    if (!inst || inst->dev_fd < 0 || msg == NULL || msg->parent.length > INT_MAX) {
         printf("[hal_spi]: pls drv_spi_inst_create first\n");
         ret = -1;
         goto out;
@@ -406,6 +420,8 @@ static int drv_spi_update_config(drv_spi_inst_t inst)
 
     if ((ret = ioctl(inst->dev_fd, RT_SPI_DEV_CTRL_CONFIG, &spi_config))) {
         printf("[hal_spi]: spi config fail: %s (errno: %d, ret: %d)\n", strerror(errno), errno, ret);
+    } else {
+        g_handle_id[inst->spi_id] = inst->handle_id;
     }
 
 out:
@@ -415,16 +431,20 @@ out:
 int drv_spi_set_baudrate(drv_spi_inst_t inst, uint32_t baudrate)
 {
     int ret = 0;
+    uint32_t old_baudrate;
 
-    if (!inst || inst->dev_fd < 0) {
+    if (!inst || inst->dev_fd < 0 || baudrate == 0) {
         printf("[hal_spi]: pls drv_spi_inst_create first\n");
         ret = -1;
         goto out;
     }
 
     pthread_spin_lock(&lock[inst->spi_id]);
+    old_baudrate = inst->baudrate;
     inst->baudrate = baudrate;
     ret = drv_spi_update_config(inst);
+    if (ret)
+        inst->baudrate = old_baudrate;
     pthread_spin_unlock(&lock[inst->spi_id]);
 
 out:
@@ -434,16 +454,20 @@ out:
 int drv_spi_set_datamode(drv_spi_inst_t inst, uint8_t mode)
 {
     int ret = 0;
+    uint8_t old_mode;
 
-    if (!inst || inst->dev_fd < 0) {
+    if (!inst || inst->dev_fd < 0 || mode > SPI_HAL_MODE_3) {
         printf("[hal_spi]: pls drv_spi_inst_create first\n");
         ret = -1;
         goto out;
     }
 
     pthread_spin_lock(&lock[inst->spi_id]);
-    inst->mode = mode;
+    old_mode = inst->mode;
+    inst->mode = (inst->mode & SPI_CS_ACTIVE_HIGH) | mode;
     ret = drv_spi_update_config(inst);
+    if (ret)
+        inst->mode = old_mode;
     pthread_spin_unlock(&lock[inst->spi_id]);
 
 out:
@@ -453,6 +477,7 @@ out:
 int drv_spi_set_cs_polarity(drv_spi_inst_t inst, bool is_active_hi)
 {
     int ret = 0;
+    uint8_t old_mode;
 
     if (!inst || inst->dev_fd < 0) {
         printf("[hal_spi]: pls drv_spi_inst_create first\n");
@@ -462,6 +487,7 @@ int drv_spi_set_cs_polarity(drv_spi_inst_t inst, bool is_active_hi)
 
     if (inst->cs_pin != -1) {
         pthread_spin_lock(&lock[inst->spi_id]);
+        old_mode = inst->mode;
         if (is_active_hi) {
             inst->mode |= SPI_CS_ACTIVE_HIGH;
             drv_gpio_value_set(inst->gpio_cs, GPIO_PV_LOW);
@@ -470,6 +496,12 @@ int drv_spi_set_cs_polarity(drv_spi_inst_t inst, bool is_active_hi)
             drv_gpio_value_set(inst->gpio_cs, GPIO_PV_HIGH);
         }
         ret = drv_spi_update_config(inst);
+        if (ret) {
+            inst->mode = old_mode;
+            drv_gpio_value_set(inst->gpio_cs,
+                               old_mode & SPI_CS_ACTIVE_HIGH ? GPIO_PV_LOW
+                                                             : GPIO_PV_HIGH);
+        }
         pthread_spin_unlock(&lock[inst->spi_id]);
     }
 
@@ -480,6 +512,7 @@ out:
 int drv_spi_set_cs_mode(drv_spi_inst_t inst, bool use_hw_cs)
 {
     int ret = 0;
+    bool old_mode;
 
     if (!inst || inst->dev_fd < 0) {
         printf("[hal_spi]: pls drv_spi_inst_create first\n");
@@ -487,16 +520,17 @@ int drv_spi_set_cs_mode(drv_spi_inst_t inst, bool use_hw_cs)
         goto out;
     }
 
-    pthread_spin_lock(&lock[inst->spi_id]);
-
     if (use_hw_cs && inst->cs_pin == -1) {
         printf("pls offer hw cs pin\n");
-        ret = -1;
-        goto out;
+        return -1;
     }
 
+    pthread_spin_lock(&lock[inst->spi_id]);
+    old_mode = inst->use_hw_cs;
     inst->use_hw_cs = use_hw_cs;
     ret = drv_spi_update_config(inst);
+    if (ret)
+        inst->use_hw_cs = old_mode;
 
     pthread_spin_unlock(&lock[inst->spi_id]);
 
@@ -507,16 +541,20 @@ out:
 int drv_spi_set_data_bits(drv_spi_inst_t inst, uint8_t data_bits)
 {
     int ret = 0;
+    uint8_t old_data_bits;
 
-    if (!inst || inst->dev_fd < 0) {
+    if (!inst || inst->dev_fd < 0 || data_bits < 4 || data_bits > 32) {
         printf("[hal_spi]: pls drv_spi_inst_create first\n");
         ret = -1;
         goto out;
     }
 
     pthread_spin_lock(&lock[inst->spi_id]);
+    old_data_bits = inst->data_bits;
     inst->data_bits = data_bits;
     ret = drv_spi_update_config(inst);
+    if (ret)
+        inst->data_bits = old_data_bits;
     pthread_spin_unlock(&lock[inst->spi_id]);
 
 out:
