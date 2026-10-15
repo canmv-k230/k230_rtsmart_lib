@@ -220,6 +220,9 @@ static int wake_attempt(void)
         return -1;
     }
 
+    if (netmgmt_utils_renew_dhcp(RT_NET_DEV_LAN) != 0)
+        MODEM_LOG("dhcp renew request failed (continuing)");
+
     if (wait_until(net_is_online, deadline) < 0) {
         MODEM_LOG("timeout: modem NIC did not come online");
         return -1;

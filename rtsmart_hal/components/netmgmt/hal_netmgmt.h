@@ -416,6 +416,20 @@ int netmgmt_utils_set_ifconfig_static(enum rt_netif_t itf, struct ifconfig_t* co
  */
 int netmgmt_utils_set_ifconfig_dhcp(enum rt_netif_t itf);
 
+/**
+ * @brief Trigger an immediate DHCP re-DISCOVER on the given interface.
+ *
+ * Emits lwIP's network-changed event (dhcp_network_changed) so a fresh DISCOVER
+ * goes out right away with the retransmit backoff reset, instead of waiting out
+ * the kernel's exponential back-off. Intended to be called the moment an
+ * upstream data path (e.g. a 4G modem dial) becomes ready. If @p itf cannot be
+ * resolved on this build, the kernel falls back to the current default device.
+ *
+ * @param[in] itf Interface type.
+ * @return 0 on success, -1 on failure.
+ */
+int netmgmt_utils_renew_dhcp(enum rt_netif_t itf);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

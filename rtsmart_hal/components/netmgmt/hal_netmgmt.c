@@ -107,7 +107,7 @@ struct rt_wlan_scan_result {
 
 struct ifconfig_cmd {
     enum rt_netif_t  net_if; /* 0: sta, 1: ap, 2:... */
-    uint16_t         func; /* 0: get ip info, 1: disable dhcp, set static ip, 2: enable dhcp */
+    uint16_t         func; /* 0: get ip info, 1: disable dhcp, set static ip, 2: enable dhcp 3: dhcp renew */
     struct ip_addr_t ip; /* IP address */
     struct ip_addr_t gw; /* gateway */
     struct ip_addr_t netmask; /* subnet mask */
@@ -865,6 +865,23 @@ int netmgmt_utils_set_ifconfig_dhcp(enum rt_netif_t itf)
 
     cmd.net_if = itf;
     cmd.func   = 2;
+
+    if (0x00 != _netmgmt_ioctl(IOCTRL_NET_IFCONFIG, &cmd)) {
+        printf("[hal_netmgmt]: %s failed\n", __FUNCTION__);
+        return -1;
+    }
+
+    return 0;
+}
+
+int netmgmt_utils_renew_dhcp(enum rt_netif_t itf)
+{
+    struct ifconfig_cmd cmd;
+
+    memset(&cmd, 0, sizeof(cmd));
+
+    cmd.net_if = itf;
+    cmd.func   = 3;
 
     if (0x00 != _netmgmt_ioctl(IOCTRL_NET_IFCONFIG, &cmd)) {
         printf("[hal_netmgmt]: %s failed\n", __FUNCTION__);
