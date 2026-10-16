@@ -27,6 +27,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
@@ -47,6 +48,8 @@
 #define MODEM_POLL_MS             10
 #define MODEM_WAKE_SRC_LEN        64   /* PMU wake-source name buffer */
 
+#define AT_BUF_SIZE 512
+
 static struct {
     int              inited;      /* modem_init() done */
     modem_cfg_t      cfg;         /* effective config (defaults + overrides) */
@@ -55,6 +58,19 @@ static struct {
     char             wake_src[MODEM_WAKE_SRC_LEN]; /* wake-source name, "" if none */
     char             imei[MODEM_IMEI_LEN + 1];     /* cached IMEI string */
     int              imei_valid;  /* IMEI cached */
+
+    /* AT subsystem: single-reader model (see at_reader_fn). */
+    int              at_fd;        /* persistent AT port fd, -1 if closed */
+    volatile int     at_reopen;    /* ask reader to drop and reopen the port */
+    pthread_t        at_reader;    /* drain/capture reader thread */
+    int              at_started;   /* reader thread created */
+    volatile int     at_run;       /* reader loop keep-running flag */
+    pthread_mutex_t  at_cmd_lock;  /* one AT command at a time */
+    pthread_mutex_t  at_fd_lock;   /* serializes at_fd close/reopen vs write */
+    pthread_mutex_t  at_buf_lock;  /* guards at_buf + at_capturing */
+    volatile int     at_capturing; /* a command is awaiting its response */
+    char             at_buf[AT_BUF_SIZE]; /* captured response bytes */
+    size_t           at_len;       /* bytes in at_buf */
 } g_modem;
 
 static long now_ms(void)
@@ -78,88 +94,193 @@ static void req_ready_set(int high)
                            high ? GPIO_PV_HIGH : GPIO_PV_LOW);
 }
 
-static int at_open(void)
+/*
+ * Single-reader AT model. The modem keeps pushing URCs on the USB-ACM port, and
+ * its write blocks until the host drains the IN endpoint; if nobody reads
+ * /dev/ttyUSB2 the modem's USB TX stalls and the ECM NIC (same composite device)
+ * stalls with it -> "has IP but no traffic", which a manual `rd` clears. The tty
+ * has a single RX ring, so two concurrent readers would steal each other's
+ * bytes. Hence one reader owns the fd: it discards bytes when idle (the drain
+ * that fixes the stall) and appends them to at_buf while a command is in flight.
+ *
+ * Thread contract: the reader is started once in modem_init() and stopped in
+ * modem_deinit(). AT callers (at_ready/dial/get_imei) must run from a single
+ * caller thread; at_cmd_lock serializes commands, at_fd_lock serializes the
+ * reader's close/reopen against the command write.
+ */
+static void at_capture(const char *data, size_t n)
 {
-    int fd = open(g_modem.cfg.at_dev, O_RDWR);
-
-    if (fd < 0)
-        return -1;
-
-    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
-    return fd;
+    pthread_mutex_lock(&g_modem.at_buf_lock);
+    if (g_modem.at_capturing) {
+        if (n > AT_BUF_SIZE - 1) {                 /* keep the newest tail */
+            data += n - (AT_BUF_SIZE - 1);
+            n = AT_BUF_SIZE - 1;
+        }
+        if (g_modem.at_len + n > AT_BUF_SIZE - 1) {
+            size_t drop = g_modem.at_len + n - (AT_BUF_SIZE - 1);
+            memmove(g_modem.at_buf, g_modem.at_buf + drop, g_modem.at_len - drop);
+            g_modem.at_len -= drop;
+        }
+        memcpy(g_modem.at_buf + g_modem.at_len, data, n);
+        g_modem.at_len += n;
+        g_modem.at_buf[g_modem.at_len] = '\0';
+    }
+    pthread_mutex_unlock(&g_modem.at_buf_lock);
 }
 
-static void at_drain(int fd)
+static void at_fd_close(void)
 {
-    char buf[128];
-
-    while (read(fd, buf, sizeof(buf)) > 0)
-        ;
+    pthread_mutex_lock(&g_modem.at_fd_lock);
+    if (g_modem.at_fd >= 0) {
+        close(g_modem.at_fd);
+        g_modem.at_fd = -1;
+    }
+    pthread_mutex_unlock(&g_modem.at_fd_lock);
 }
 
-static int at_cmd(int fd, const char *cmd, char *resp, size_t resp_size,
-                  int timeout_ms)
+static void *at_reader_fn(void *arg)
 {
-    char   line[64];
-    char   local[512];
-    size_t len = 0;
-    long   deadline = now_ms() + timeout_ms;
-    int    n;
+    char chunk[128];
+    int  n;
 
-    if (!resp || resp_size == 0) {
-        resp = local;
-        resp_size = sizeof(local);
-    }
-    resp[0] = '\0';
+    (void)arg;
+    while (g_modem.at_run) {
+        if (g_modem.at_reopen && g_modem.at_fd >= 0)
+            at_fd_close();                     /* AT not answering -> fresh open */
+        g_modem.at_reopen = 0;
 
-    at_drain(fd);
+        if (g_modem.at_fd < 0) {               /* port absent or being reopened */
+            int fd = open(g_modem.cfg.at_dev, O_RDWR);
 
-    n = snprintf(line, sizeof(line), "%s\r", cmd);
-    if (n <= 0 || write(fd, line, (size_t)n) != n) {
-        MODEM_LOG("write '%s' failed: errno=%d", cmd, errno);
-        return -1;
-    }
-
-    for (;;) {
-        char chunk[128];
-
-        n = (int)read(fd, chunk, sizeof(chunk));
-        if (n > 0) {
-            size_t copy = (size_t)n;
-
-            if (copy > resp_size - 1)
-                copy = resp_size - 1;
-            if (len + copy > resp_size - 1) {
-                size_t drop = len + copy - (resp_size - 1);
-                memmove(resp, resp + drop, len - drop);
-                len -= drop;
+            if (fd < 0) {
+                sleep_ms(100);
+                continue;
             }
-            memcpy(resp + len, chunk + (n - copy), copy);
-            len += copy;
-            resp[len] = '\0';
-
-            if (strstr(resp, "ERROR"))
-                return 0;
-            if (strstr(resp, "OK\r") || strstr(resp, "OK\n"))
-                return 1;
+            fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+            pthread_mutex_lock(&g_modem.at_fd_lock);
+            g_modem.at_fd = fd;
+            pthread_mutex_unlock(&g_modem.at_fd_lock);
         }
 
-        if (now_ms() >= deadline)
-            return -1;
-        sleep_ms(20);
+        n = (int)read(g_modem.at_fd, chunk, sizeof(chunk));
+        if (n > 0) {
+            at_capture(chunk, (size_t)n);
+        } else if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+            at_fd_close();                     /* port gone -> reopen */
+            sleep_ms(50);
+        } else {
+            sleep_ms(MODEM_POLL_MS);           /* idle */
+        }
     }
+
+    at_fd_close();
+    return NULL;
+}
+
+static void at_start(void)
+{
+    pthread_mutex_init(&g_modem.at_cmd_lock, NULL);
+    pthread_mutex_init(&g_modem.at_fd_lock, NULL);
+    pthread_mutex_init(&g_modem.at_buf_lock, NULL);
+    g_modem.at_fd  = -1;
+    g_modem.at_run = 1;
+    if (pthread_create(&g_modem.at_reader, NULL, at_reader_fn, NULL) == 0)
+        g_modem.at_started = 1;
+    else
+        MODEM_LOG("create AT reader failed");
+}
+
+static void at_stop(void)
+{
+    if (g_modem.at_started) {
+        g_modem.at_run = 0;
+        pthread_join(g_modem.at_reader, NULL);
+        g_modem.at_started = 0;
+    }
+    pthread_mutex_destroy(&g_modem.at_cmd_lock);
+    pthread_mutex_destroy(&g_modem.at_fd_lock);
+    pthread_mutex_destroy(&g_modem.at_buf_lock);
+}
+
+/* Write the whole buffer to the AT fd, retrying soft errors; at_fd_lock keeps
+ * the reader from closing the fd mid-write. Returns bytes written. */
+static int at_write_all(const char *buf, int len)
+{
+    long deadline = now_ms() + 1000;
+    int  off = 0;
+
+    while (off < len && now_ms() < deadline) {
+        ssize_t w;
+
+        pthread_mutex_lock(&g_modem.at_fd_lock);
+        w = (g_modem.at_fd >= 0) ? write(g_modem.at_fd, buf + off, len - off) : -1;
+        pthread_mutex_unlock(&g_modem.at_fd_lock);
+
+        if (w > 0)
+            off += (int)w;
+        else if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+            sleep_ms(MODEM_POLL_MS);
+        else
+            break;
+    }
+    return off;
+}
+
+/* Send one AT command and wait for OK/ERROR. 1=OK, 0=ERROR, -1=timeout/not ready. */
+static int at_cmd(const char *cmd, char *resp, size_t resp_size, int timeout_ms)
+{
+    char line[64];
+    long deadline;
+    int  n, rc = -1;
+
+    pthread_mutex_lock(&g_modem.at_cmd_lock);
+
+    if (g_modem.at_fd < 0) {               /* port not ready yet (quiet) */
+        pthread_mutex_unlock(&g_modem.at_cmd_lock);
+        return -1;
+    }
+
+    pthread_mutex_lock(&g_modem.at_buf_lock);
+    g_modem.at_len = 0;
+    g_modem.at_buf[0] = '\0';
+    g_modem.at_capturing = 1;
+    pthread_mutex_unlock(&g_modem.at_buf_lock);
+
+    n = snprintf(line, sizeof(line), "%s\r", cmd);
+    if (n <= 0 || at_write_all(line, n) != n) {
+        MODEM_LOG("write '%s' failed: errno=%d", cmd, errno);
+    } else {
+        deadline = now_ms() + timeout_ms;
+        while (now_ms() < deadline) {
+            pthread_mutex_lock(&g_modem.at_buf_lock);
+            if (strstr(g_modem.at_buf, "ERROR"))
+                rc = 0;
+            else if (strstr(g_modem.at_buf, "OK\r") || strstr(g_modem.at_buf, "OK\n"))
+                rc = 1;
+            pthread_mutex_unlock(&g_modem.at_buf_lock);
+            if (rc >= 0)
+                break;
+            sleep_ms(MODEM_POLL_MS);
+        }
+    }
+
+    pthread_mutex_lock(&g_modem.at_buf_lock);
+    if (resp && resp_size) {
+        strncpy(resp, g_modem.at_buf, resp_size - 1);
+        resp[resp_size - 1] = '\0';
+    }
+    g_modem.at_capturing = 0;
+    pthread_mutex_unlock(&g_modem.at_buf_lock);
+    pthread_mutex_unlock(&g_modem.at_cmd_lock);
+    return rc;
 }
 
 static int at_ready(void)
 {
-    int fd = at_open();
-    int rc;
-
-    if (fd < 0)
-        return 0;
-    rc = at_cmd(fd, "AT", NULL, 0, 500);
-    close(fd);
-    return rc == 1;
+    if (at_cmd("AT", NULL, 0, 500) == 1)
+        return 1;
+    g_modem.at_reopen = 1; /* reopen a fresh session until the channel answers */
+    return 0;
 }
 
 static int net_is_online(void)
@@ -174,15 +295,8 @@ static int net_is_online(void)
 static int modem_dial(void)
 {
     char resp[256];
-    int  fd = at_open();
-    int  rc;
-
-    if (fd < 0)
-        return -1;
-
-    rc = at_cmd(fd, g_modem.cfg.dial_cmd, resp, sizeof(resp),
-                g_modem.cfg.dial_timeout_ms);
-    close(fd);
+    int  rc = at_cmd(g_modem.cfg.dial_cmd, resp, sizeof(resp),
+                     g_modem.cfg.dial_timeout_ms);
 
     if (rc == 1)
         MODEM_LOG("dial '%s' -> OK", g_modem.cfg.dial_cmd);
@@ -302,6 +416,7 @@ int modem_init(const modem_cfg_t *cfg)
     }
 
     latch_wakeup_source();
+    at_start();
 
     g_modem.inited = 1;
     MODEM_LOG("init ok: req_ready=GPIO%d at=%s",
@@ -313,6 +428,8 @@ void modem_deinit(void)
 {
     if (!g_modem.inited)
         return;
+
+    at_stop(); /* stop the AT reader thread and close the port */
 
     if (g_modem.req_ready)
         drv_gpio_inst_destroy(&g_modem.req_ready);
@@ -345,7 +462,7 @@ int modem_wake(void)
 int modem_get_imei(char *buf, size_t size)
 {
     char resp[256];
-    int  fd, rc, i, start = -1;
+    int  rc, i, start = -1;
 
     if (!g_modem.inited || !buf || size < MODEM_IMEI_LEN + 1)
         return -1;
@@ -355,12 +472,7 @@ int modem_get_imei(char *buf, size_t size)
         return 0;
     }
 
-    fd = at_open();
-    if (fd < 0)
-        return -1;
-
-    rc = at_cmd(fd, "AT+CGSN=1", resp, sizeof(resp), 5000);
-    close(fd);
+    rc = at_cmd("AT+CGSN=1", resp, sizeof(resp), 5000);
     if (rc != 1) {
         MODEM_LOG("AT+CGSN=1 failed (%d)", rc);
         return -1;
