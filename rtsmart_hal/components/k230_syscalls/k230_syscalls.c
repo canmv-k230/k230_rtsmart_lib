@@ -45,6 +45,10 @@
 #undef posix_fallocate64
 #endif
 
+#ifdef ftruncate64
+#undef ftruncate64
+#endif
+
 #define RT_FIOPREALLOCATE 0x52540003U
 
 #define RTSMART_ABI_ASSERT(name, condition) \
@@ -131,6 +135,21 @@ int posix_fallocate(int fd, off_t offset, off_t len)
 int posix_fallocate64(int fd, off_t offset, off_t len)
 {
     return posix_fallocate(fd, offset, len);
+}
+
+/* DFS ftruncate has no userspace syscall entry yet. Override the toolchain
+ * stubs so applications cannot mistake an unchanged file for success. */
+int ftruncate(int fd, off_t length)
+{
+    (void)fd;
+    (void)length;
+    errno = ENOSYS;
+    return -1;
+}
+
+int ftruncate64(int fd, off_t length)
+{
+    return ftruncate(fd, length);
 }
 
 #define PMUTEX_LOCK    1
