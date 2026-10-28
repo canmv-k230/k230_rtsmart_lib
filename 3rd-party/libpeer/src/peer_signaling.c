@@ -511,7 +511,7 @@ static int peer_signaling_mqtt_subscribe(int subscribed) {
 static void peer_signaling_onicecandidate(char* description, void* userdata) {
   cJSON* res;
   char* payload;
-  printf("=========== ICE Candidates ===========\n%s\n======================================\n", description);
+  // LOGI("ICE candidates: %s", description);
   if (g_ps.id > 0) {
     res = cJSON_CreateObject();
     cJSON_AddStringToObject(res, "jsonrpc", RPC_VERSION);
@@ -538,9 +538,11 @@ static void peer_signaling_onicecandidate(char* description, void* userdata) {
 
 int peer_signaling_connect(const char* url, const char* token, PeerConnection* pc) {
   char* client_id;
+  int ret = 0;
 
   if ((g_ps.proto = peer_signaling_resolve_url(url, g_ps.host, &g_ps.port, g_ps.path)) < 0) {
     LOGE("Resolve URL failed");
+    return -1;
   }
 
   if (token && strlen(token) > 0) {
@@ -557,7 +559,12 @@ int peer_signaling_connect(const char* url, const char* token, PeerConnection* p
       snprintf(g_ps.subtopic, sizeof(g_ps.subtopic), "%s/invoke", g_ps.path);
       snprintf(g_ps.pubtopic, sizeof(g_ps.pubtopic), "%s/result", g_ps.path);
       if (peer_signaling_mqtt_connect(g_ps.host, g_ps.port) == 0) {
-        peer_signaling_mqtt_subscribe(1);
+        ret = peer_signaling_mqtt_subscribe(1);
+        if (ret == 0) {
+          ssl_transport_set_read_timeout(&g_ps.net_ctx, CONFIG_TLS_READ_TIMEOUT);
+        }
+      } else {
+        ret = -1;
       }
     } break;
     case 1: {  // HTTP
@@ -567,7 +574,7 @@ int peer_signaling_connect(const char* url, const char* token, PeerConnection* p
     } break;
   }
 
-  return 0;
+  return ret;
 }
 
 void peer_signaling_set_custom_rpc_handler(peer_signaling_custom_rpc_cb cb, void* userdata) {

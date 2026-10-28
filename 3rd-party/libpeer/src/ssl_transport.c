@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/debug.h"
@@ -99,7 +100,7 @@ int ssl_transport_connect(NetworkContext_t* net_ctx,
     return -1;
   }
 
-  mbedtls_ssl_conf_read_timeout(&net_ctx->conf, CONFIG_TLS_READ_TIMEOUT);
+  mbedtls_ssl_conf_read_timeout(&net_ctx->conf, CONFIG_TLS_HANDSHAKE_READ_TIMEOUT);
   mbedtls_ssl_set_bio(&net_ctx->ssl, &net_ctx->tcp_socket,
                       ssl_transport_mbedlts_send, NULL, ssl_transport_mbedtls_recv_timeout);
 
@@ -112,7 +113,15 @@ int ssl_transport_connect(NetworkContext_t* net_ctx,
   }
 
   LOGI("handshake success");
+
   return 0;
+}
+
+/* Caller switches to the short steady-state timeout only once MQTT CONNACK
+ * and SUBACK are confirmed — doing it earlier starves MQTT_ProcessLoop()'s
+ * single-shot recv() before those replies arrive. */
+void ssl_transport_set_read_timeout(NetworkContext_t* net_ctx, uint32_t timeout_ms) {
+  mbedtls_ssl_conf_read_timeout(&net_ctx->conf, timeout_ms);
 }
 
 void ssl_transport_disconnect(NetworkContext_t* net_ctx) {

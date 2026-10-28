@@ -1425,24 +1425,10 @@ int agent_connectivity_check(Agent* agent) {
       if (pair->local->type == ICE_CANDIDATE_TYPE_RELAY && !agent->turn_relay_ready) {
         LOGD("relay pair not ready, skipping binding request");
       } else if (agent_is_relay_active(agent)) {
-        char remote_str[ADDRSTRLEN];
-        char local_str[ADDRSTRLEN];
-        addr_to_string(&pair->remote->addr, remote_str, sizeof(remote_str));
-        addr_to_string(&pair->local->addr, local_str, sizeof(local_str));
-        LOGI("send binding request from %s:%d to %s:%d (via TURN relay)",
-             local_str, pair->local->addr.port,
-             remote_str, pair->remote->addr.port);
         if (agent_create_binding_request(agent, &msg) == 0) {
           agent_turn_relay_send(agent, msg.buf, msg.size, &pair->remote->addr);
         }
       } else {
-        char remote_str[ADDRSTRLEN];
-        char local_str[ADDRSTRLEN];
-        addr_to_string(&pair->remote->addr, remote_str, sizeof(remote_str));
-        addr_to_string(&pair->local->addr, local_str, sizeof(local_str));
-        LOGI("send binding request from %s:%d to %s:%d",
-             local_str, pair->local->addr.port,
-             remote_str, pair->remote->addr.port);
         if (agent_create_binding_request(agent, &msg) == 0) {
           agent_socket_send(agent, &pair->remote->addr, msg.buf, msg.size);
         }
