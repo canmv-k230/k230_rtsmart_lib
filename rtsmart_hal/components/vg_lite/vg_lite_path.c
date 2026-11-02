@@ -2374,6 +2374,54 @@ vg_lite_error_t vg_lite_draw_radial_grad(vg_lite_buffer_t * target,
 
 #else /* (CHIPID==0x355 || CHIPID==0x255) */
 
+#if !gcFEATURE_VG_PARALLEL_PATHS
+/* Tessellation strips must not cross a multiple of this many rows (a power
+ * of two). */
+#define TESS_STRIP_ROWS 512
+
+/*
+ * Height of the tessellation strip that starts at row y of a path window
+ * ending at max_y: up to the next TESS_STRIP_ROWS boundary.  The GC265 hangs
+ * on 16x anti-aliased paths whose window crosses one, once the tessellation
+ * buffer has wrapped: an unscissored draw on K230 tessellates the whole
+ * 1080-row target and stops the GPU within seconds.  The upstream VGLite 4.x
+ * driver splits strips the same way on cores without its
+ * gcFEATURE_VG_512_PARALLEL_PATHS feature, which this older driver does not
+ * define.
+ */
+static int tessellation_strip_height(int y, int max_y)
+{
+    int strip = max_y - y;
+    int to_boundary = ((y + TESS_STRIP_ROWS) & ~(TESS_STRIP_ROWS - 1)) - y;
+
+    return strip < to_boundary ? strip : to_boundary;
+}
+
+/*
+ * Call after each tessellated strip.  Every parallel_workpaths strips, stall
+ * the command stream until the pixel engine has caught up, so the
+ * tessellator cannot run further ahead through the tessellation buffer.  The
+ * vendor code did this only for paths sent inline.  On K230, uploaded 16x
+ * paths without it hung the GPU after minutes of continuous drawing, while
+ * the same load sent inline ran for ten minutes.
+ *
+ * The count deliberately carries over between draws: most paths fit in one
+ * strip, so a count reset per draw would never reach parallel_workpaths and
+ * the stall would never be emitted.
+ */
+static vg_lite_error_t limit_strips_in_flight(uint32_t parallel_workpaths)
+{
+    vg_lite_error_t error;
+
+    if (++s_context.path_counter < parallel_workpaths)
+        return VG_LITE_SUCCESS;
+    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0E02, 0x10 | (0x7 << 8)));
+    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0F00, 0x10 | (0x7 << 8)));
+    s_context.path_counter = 0;
+    return VG_LITE_SUCCESS;
+}
+#endif
+
 /* GC555 vg_lite_draw API implementation
  */
 vg_lite_error_t vg_lite_draw(vg_lite_buffer_t* target,
@@ -2587,45 +2635,30 @@ vg_lite_error_t vg_lite_draw(vg_lite_buffer_t* target,
             if (parallel_workpaths1 > parallel_workpaths2)
                 parallel_workpaths1 = parallel_workpaths2;
 
-            for (y = point_min.y; y < point_max.y; y += height) {
+            for (y = point_min.y; y < point_max.y; y += temp_height) {
+                temp_height = tessellation_strip_height(y, point_max.y);
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A1B, 0x00011000));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3D, tessellation_size / 64));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A39, point_min.x | (y << 16)));
-                if (y + height > point_max.y) {
-                    temp_height = point_max.y - y;
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
-                }
-                else {
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (height << 16)));
-                }
+                VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
 
                 if (VLM_PATH_GET_UPLOAD_BIT(*path) == 1) {
                     VG_LITE_RETURN_ERROR(push_call(&s_context, path->uploaded.address, path->uploaded.bytes));
                 }
                 else {
                     VG_LITE_RETURN_ERROR(push_data(&s_context, path->path_length, path->path));
-                    s_context.path_counter++;
-                    if (parallel_workpaths1 == s_context.path_counter) {
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0E02, 0x10 | (0x7 << 8)));
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0F00, 0x10 | (0x7 << 8)));
-                        s_context.path_counter = 0;
-                    }
                 }
+                VG_LITE_RETURN_ERROR(limit_strips_in_flight(parallel_workpaths1));
             }
         }
 
         if (path->path_type == VG_LITE_DRAW_STROKE_PATH || path->path_type == VG_LITE_DRAW_FILL_STROKE_PATH) {
-            for (y = point_min.y; y < point_max.y; y += height) {
+            for (y = point_min.y; y < point_max.y; y += temp_height) {
+                temp_height = tessellation_strip_height(y, point_max.y);
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A1B, 0x00011000));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3D, tessellation_size / 64));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A39, point_min.x | (y << 16)));
-                if (y + height > point_max.y) {
-                    temp_height = point_max.y - y;
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
-                }
-                else {
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (height << 16)));
-                }
+                VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
 
                 if (VLM_PATH_GET_UPLOAD_BIT(*path) == 1) {
                     VG_LITE_RETURN_ERROR(push_call(&s_context, path->uploaded.address, path->uploaded.bytes));
@@ -2635,13 +2668,8 @@ vg_lite_error_t vg_lite_draw(vg_lite_buffer_t* target,
                     VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A34, 0x01000200 | format | quality | tiling | 0x0));
                     VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A02, path->stroke_color));
                     VG_LITE_RETURN_ERROR(push_data(&s_context, path->stroke_size, path->stroke_path));
-                    s_context.path_counter++;
-                    if (parallel_workpaths1 == s_context.path_counter) {
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0E02, 0x10 | (0x7 << 8)));
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0F00, 0x10 | (0x7 << 8)));
-                        s_context.path_counter = 0;
-                    }
                 }
+                VG_LITE_RETURN_ERROR(limit_strips_in_flight(parallel_workpaths1));
             }
         }
     }
@@ -3090,44 +3118,29 @@ vg_lite_error_t vg_lite_draw_pattern(vg_lite_buffer_t* target,
             if (parallel_workpaths1 > parallel_workpaths2)
                 parallel_workpaths1 = parallel_workpaths2;
 
-            for (y = point_min.y; y < point_max.y; y += height) {
+            for (y = point_min.y; y < point_max.y; y += temp_height) {
+                temp_height = tessellation_strip_height(y, point_max.y);
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A1B, 0x00011000));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3D, tessellation_size / 64));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A39, point_min.x | (y << 16)));
-                if (y + height > point_max.y) {
-                    temp_height = point_max.y - y;
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
-                }
-                else {
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (height << 16)));
-                }
+                VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
 
                 if (VLM_PATH_GET_UPLOAD_BIT(*path) == 1) {
                     VG_LITE_RETURN_ERROR(push_call(&s_context, path->uploaded.address, path->uploaded.bytes));
                 } else {
                     VG_LITE_RETURN_ERROR(push_data(&s_context, path->path_length, path->path));
-                    s_context.path_counter ++;
-                    if (parallel_workpaths1 == s_context.path_counter) {
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0E02, 0x10 | (0x7 << 8)));
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0F00, 0x10 | (0x7 << 8)));
-                        s_context.path_counter = 0;
-                    }
                 }
+                VG_LITE_RETURN_ERROR(limit_strips_in_flight(parallel_workpaths1));
             }
         }
 
         if (path->path_type == VG_LITE_DRAW_STROKE_PATH || path->path_type == VG_LITE_DRAW_FILL_STROKE_PATH) {
-            for (y = point_min.y; y < point_max.y; y += height) {
+            for (y = point_min.y; y < point_max.y; y += temp_height) {
+                temp_height = tessellation_strip_height(y, point_max.y);
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A1B, 0x00011000));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3D, tessellation_size / 64));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A39, point_min.x | (y << 16)));
-                if (y + height > point_max.y) {
-                    temp_height = point_max.y - y;
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
-                }
-                else {
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (height << 16)));
-                }
+                VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
 
                 if (VLM_PATH_GET_UPLOAD_BIT(*path) == 1) {
                     VG_LITE_RETURN_ERROR(push_call(&s_context, path->uploaded.address, path->uploaded.bytes));
@@ -3136,13 +3149,8 @@ vg_lite_error_t vg_lite_draw_pattern(vg_lite_buffer_t* target,
                     VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A34, 0x01000200 | format | quality | tiling | 0x0));
                     VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A02, path->stroke_color));
                     VG_LITE_RETURN_ERROR(push_data(&s_context, path->stroke_size, path->stroke_path));
-                    s_context.path_counter ++;
-                    if (parallel_workpaths1 == s_context.path_counter) {
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0E02, 0x10 | (0x7 << 8)));
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0F00, 0x10 | (0x7 << 8)));
-                        s_context.path_counter = 0;
-                    }
                 }
+                VG_LITE_RETURN_ERROR(limit_strips_in_flight(parallel_workpaths1));
             }
         }
     }
@@ -3592,44 +3600,29 @@ vg_lite_error_t vg_lite_draw_linear_grad(vg_lite_buffer_t* target,
             if (parallel_workpaths1 > parallel_workpaths2)
                 parallel_workpaths1 = parallel_workpaths2;
 
-            for (y = point_min.y; y < point_max.y; y += height) {
+            for (y = point_min.y; y < point_max.y; y += temp_height) {
+                temp_height = tessellation_strip_height(y, point_max.y);
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A1B, 0x00011000));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3D, tessellation_size / 64));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A39, point_min.x | (y << 16)));
-                if (y + height > point_max.y) {
-                    temp_height = point_max.y - y;
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
-                }
-                else {
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (height << 16)));
-                }
+                VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
 
                 if (VLM_PATH_GET_UPLOAD_BIT(*path) == 1) {
                     VG_LITE_RETURN_ERROR(push_call(&s_context, path->uploaded.address, path->uploaded.bytes));
                 } else {
                     VG_LITE_RETURN_ERROR(push_data(&s_context, path->path_length, path->path));
-                    s_context.path_counter ++;
-                    if (parallel_workpaths1 == s_context.path_counter) {
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0E02, 0x10 | (0x7 << 8)));
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0F00, 0x10 | (0x7 << 8)));
-                        s_context.path_counter = 0;
-                    }
                 }
+                VG_LITE_RETURN_ERROR(limit_strips_in_flight(parallel_workpaths1));
             }
         }
 
         if (path->path_type == VG_LITE_DRAW_STROKE_PATH || path->path_type == VG_LITE_DRAW_FILL_STROKE_PATH) {
-            for (y = point_min.y; y < point_max.y; y += height) {
+            for (y = point_min.y; y < point_max.y; y += temp_height) {
+                temp_height = tessellation_strip_height(y, point_max.y);
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A1B, 0x00011000));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3D, tessellation_size / 64));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A39, point_min.x | (y << 16)));
-                if (y + height > point_max.y) {
-                    temp_height = point_max.y - y;
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
-                }
-                else {
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (height << 16)));
-                }
+                VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
 
                 if (VLM_PATH_GET_UPLOAD_BIT(*path) == 1) {
                     VG_LITE_RETURN_ERROR(push_call(&s_context, path->uploaded.address, path->uploaded.bytes));
@@ -3638,13 +3631,8 @@ vg_lite_error_t vg_lite_draw_linear_grad(vg_lite_buffer_t* target,
                     VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A34, 0x01000200 | format | quality | tiling | 0x0));
                     VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A02, path->stroke_color));
                     VG_LITE_RETURN_ERROR(push_data(&s_context, path->stroke_size, path->stroke_path));
-                    s_context.path_counter ++;
-                    if (parallel_workpaths1 == s_context.path_counter) {
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0E02, 0x10 | (0x7 << 8)));
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0F00, 0x10 | (0x7 << 8)));
-                        s_context.path_counter = 0;
-                    }
                 }
+                VG_LITE_RETURN_ERROR(limit_strips_in_flight(parallel_workpaths1));
             }
         }
     }
@@ -4354,43 +4342,28 @@ vg_lite_error_t vg_lite_draw_radial_grad(vg_lite_buffer_t* target,
             if (parallel_workpaths1 > parallel_workpaths2)
                 parallel_workpaths1 = parallel_workpaths2;
 
-            for (y = point_min.y; y < point_max.y; y += height) {
+            for (y = point_min.y; y < point_max.y; y += temp_height) {
+                temp_height = tessellation_strip_height(y, point_max.y);
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A1B, 0x00011000));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3D, tessellation_size / 64));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A39, point_min.x | (y << 16)));
-                if (y + height > point_max.y) {
-                    temp_height = point_max.y - y;
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
-                }
-                else {
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (height << 16)));
-                }
+                VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
 
                 if (VLM_PATH_GET_UPLOAD_BIT(*path) == 1) {
                     VG_LITE_RETURN_ERROR(push_call(&s_context, path->uploaded.address, path->uploaded.bytes));
                 } else {
                     VG_LITE_RETURN_ERROR(push_data(&s_context, path->path_length, path->path));
-                    s_context.path_counter ++;
-                    if (parallel_workpaths1 == s_context.path_counter) {
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0E02, 0x10 | (0x7 << 8)));
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0F00, 0x10 | (0x7 << 8)));
-                        s_context.path_counter = 0;
-                    }
                 }
+                VG_LITE_RETURN_ERROR(limit_strips_in_flight(parallel_workpaths1));
             }
         }
         if (path->path_type == VG_LITE_DRAW_STROKE_PATH || path->path_type == VG_LITE_DRAW_FILL_STROKE_PATH) {
-            for (y = point_min.y; y < point_max.y; y += height) {
+            for (y = point_min.y; y < point_max.y; y += temp_height) {
+                temp_height = tessellation_strip_height(y, point_max.y);
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A1B, 0x00011000));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3D, tessellation_size / 64));
                 VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A39, point_min.x | (y << 16)));
-                if (y + height > point_max.y) {
-                    temp_height = point_max.y - y;
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
-                }
-                else {
-                    VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (height << 16)));
-                }
+                VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A3A, width | (temp_height << 16)));
 
                 if (VLM_PATH_GET_UPLOAD_BIT(*path) == 1) {
                     VG_LITE_RETURN_ERROR(push_call(&s_context, path->uploaded.address, path->uploaded.bytes));
@@ -4399,13 +4372,8 @@ vg_lite_error_t vg_lite_draw_radial_grad(vg_lite_buffer_t* target,
                     VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A34, 0x01000200 | format | quality | tiling | 0x0));
                     VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0A02, path->stroke_color));
                     VG_LITE_RETURN_ERROR(push_data(&s_context, path->stroke_size, path->stroke_path));
-                    s_context.path_counter ++;
-                    if (parallel_workpaths1 == s_context.path_counter) {
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0E02, 0x10 | (0x7 << 8)));
-                        VG_LITE_RETURN_ERROR(push_state(&s_context, 0x0F00, 0x10 | (0x7 << 8)));
-                        s_context.path_counter = 0;
-                    }
                 }
+                VG_LITE_RETURN_ERROR(limit_strips_in_flight(parallel_workpaths1));
             }
         }
     }

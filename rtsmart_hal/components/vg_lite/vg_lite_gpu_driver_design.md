@@ -331,6 +331,8 @@ for (y = point_min.y; y < point_max.y; y += height) {
 
 **Each tile** incurs a STALL (wait for previous tile complete), FLUSH, and register programming overhead. For a 1920×1080 target with 128×16 tiles, this means roughly **960 tiles** each with 6 command buffer pushes (48 bytes each = 46KB of command buffer overhead per path).
 
+The GC265 path functions (the `#else` branch of `vg_lite_path.c`) instead tessellate horizontal strips of the path window, programming `0x0A39`/`0x0A3A` per strip. `tessellation_strip_height()` stops every strip at a 512-row boundary (`TESS_STRIP_ROWS`), as the upstream VGLite 4.x driver does on cores without its `gcFEATURE_VG_512_PARALLEL_PATHS` feature (not defined in this driver). Without this, a 16x (`VG_LITE_HIGH`) path whose window crosses row 512, such as any unscissored draw on a 1080-row target, hangs the GPU once the tessellation buffer has wrapped. The tessellation buffer is used as a ring and is never cleared, so it wraps within seconds. After every strip, `limit_strips_in_flight()` counts it, and every `parallel_workpaths1` (2) strips it emits the `0x0E02`/`0x0F00` semaphore stall. The count carries over between draws, since most paths are a single strip. This keeps the tessellator from running ahead of the pixel engine through that ring. The vendor code counted only paths sent inline. Uploaded 16x paths without the stall still hung after minutes of continuous drawing. Do not add `0x0A1B = 0x101` after strips: upstream does this, but on K230 it times out the GPU on the first frame.
+
 ---
 
 ## 6. Performance Bottleneck Analysis
