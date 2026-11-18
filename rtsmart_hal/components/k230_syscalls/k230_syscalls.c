@@ -36,10 +36,34 @@
 #include <poll.h>
 #include <pthread.h>
 #include <sched.h>
+#include <stdarg.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <sys/time.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/uio.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "hal_syscall.h"
+
+/* The 64-bit names are macros for the plain ones under _GNU_SOURCE; this
+ * file defines both, so that libc.a never has to supply either. */
+#undef pread64
+#undef pwrite64
+#undef preadv64
+#undef pwritev64
+#undef openat64
+#undef fstatat64
+#undef lseek64
+#undef fallocate64
+#undef statfs64
+#undef statvfs64
+#undef fstatfs64
+#undef fstatvfs64
 
 #ifdef posix_fallocate64
 #undef posix_fallocate64
@@ -80,10 +104,22 @@ struct dfs_preallocate_args
 ///////////////////////////////////////////////////////////////////////////////
 // Syscalls for statfs and statvfs ////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
+/* syscall() is a bare ecall: it returns the kernel's -errno. */
+static long k230_result(long result)
+{
+    if (result < 0)
+    {
+        errno = (int)-result;
+        return -1;
+    }
+    return result;
+}
+
 int statfs(const char* path, struct statfs* buf)
 {
     *buf = (struct statfs) { 0 };
-    return syscall(_NRSYS_statfs, path, buf);
+    /* This returned the raw -errno, not -1 with errno set. */
+    return (int)k230_result(syscall(_NRSYS_statfs, path, buf));
 }
 
 static void fixup(struct statvfs* out, const struct statfs* in)
@@ -112,6 +148,51 @@ int statvfs(const char* restrict path, struct statvfs* restrict buf)
     return 0;
 }
 
+/* The path of an open descriptor, from the kernel's /proc/self/fd/N. */
+static int fd_path(int fd, char *out, size_t size)
+{
+    char link[32];
+    ssize_t n;
+
+    snprintf(link, sizeof(link), "/proc/self/fd/%d", fd);
+    n = readlink(link, out, size - 1);
+    if (n < 0)
+        return -1;
+    if ((size_t)n >= size - 1)
+    {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    out[n] = '\0';
+    return 0;
+}
+
+/* libc.a's statvfs.o defines all of these, statvfs strongly: one of them
+ * pulling it in next to the overrides above was a duplicate definition. */
+int fstatfs(int fd, struct statfs *buf)
+{
+    char path[PATH_MAX];
+
+    if (fd_path(fd, path, sizeof(path)) < 0)
+        return -1;
+    return statfs(path, buf);
+}
+
+int fstatvfs(int fd, struct statvfs *buf)
+{
+    struct statfs kbuf;
+
+    if (fstatfs(fd, &kbuf) < 0)
+        return -1;
+    fixup(buf, &kbuf);
+    return 0;
+}
+
+int statfs64(const char *path, struct statfs *buf) { return statfs(path, buf); }
+int statvfs64(const char *restrict path, struct statvfs *restrict buf) { return statvfs(path, buf); }
+int fstatfs64(int fd, struct statfs *buf) { return fstatfs(fd, buf); }
+int fstatvfs64(int fd, struct statvfs *buf) { return fstatvfs(fd, buf); }
+
 /*
  * FatFs f_expand() only supports allocating an empty file from offset 0 and
  * does not provide general sparse/zero-fill semantics for arbitrary ranges.
@@ -137,14 +218,9 @@ int posix_fallocate64(int fd, off_t offset, off_t len)
     return posix_fallocate(fd, offset, len);
 }
 
-/* DFS ftruncate has no userspace syscall entry yet. Override the toolchain
- * stubs so applications cannot mistake an unchanged file for success. */
 int ftruncate(int fd, off_t length)
 {
-    (void)fd;
-    (void)length;
-    errno = ENOSYS;
-    return -1;
+    return (int)k230_result(syscall(_NRSYS_ftruncate, fd, length));
 }
 
 int ftruncate64(int fd, off_t length)
@@ -397,4 +473,468 @@ int socketpair(int domain, int type, int protocol, int sockets[2])
 int sched_yield(void)
 {
     return (int)syscall(_NRSYS_sched_yield);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// File syscalls the toolchain's musl answers with a fake success /////////////
+///////////////////////////////////////////////////////////////////////////////
+/*
+ * The RT-Thread musl port maps these to stubs that return 0 without calling
+ * the kernel ([empty syscall] on the console): pread() looked like EOF,
+ * openat() returned fd 0, pipe2() left its array unset, fstatat() left the
+ * buffer as it was. Each override below replaces every symbol of the libc.a
+ * member it stands for. librtsmart_hal.mk links this object in up front
+ * (__k230_syscalls_anchor), so libc's own callers (popen() -> pipe2()) bind
+ * to these too. musl's stdio calls readv/writev through its internal syscall
+ * table, which no override reaches.
+ */
+int __k230_syscalls_anchor;
+
+pid_t waitpid(pid_t pid, int *status, int options)
+{
+    return (pid_t)k230_result(syscall(_NRSYS_waitpid, pid, status, options));
+}
+
+pid_t getppid(void) { return (pid_t)k230_result(syscall(_NRSYS_getppid)); }
+pid_t getpgid(pid_t pid) { return (pid_t)k230_result(syscall(_NRSYS_getpgid, pid)); }
+pid_t getpgrp(void) { return getpgid(0); }
+pid_t getsid(pid_t pid) { return (pid_t)k230_result(syscall(_NRSYS_getsid, pid)); }
+int setpgid(pid_t pid, pid_t pgid) { return (int)k230_result(syscall(_NRSYS_setpgid, pid, pgid)); }
+int setpgrp(void) { return setpgid(0, 0); }
+
+int setitimer(int which, const struct itimerval *restrict value, struct itimerval *restrict old)
+{
+    return (int)k230_result(syscall(_NRSYS_setitimer, which, value, old));
+}
+
+useconds_t ualarm(useconds_t value, useconds_t interval)
+{
+    struct itimerval v = {
+        .it_value = { value / 1000000, value % 1000000 },
+        .it_interval = { interval / 1000000, interval % 1000000 }
+    }, old;
+    if (setitimer(ITIMER_REAL, &v, &old) < 0) return (useconds_t)-1;
+    return old.it_value.tv_sec * 1000000 + old.it_value.tv_usec;
+}
+
+unsigned alarm(unsigned seconds)
+{
+    struct itimerval v = { .it_value = { seconds, 0 } }, old;
+    if (setitimer(ITIMER_REAL, &v, &old) < 0) return 0;
+    return old.it_value.tv_sec + (old.it_value.tv_usec != 0);
+}
+
+/* libc's internal readlinkat stub makes realpath treat every component as
+ * an empty symbolic link. Normalize DFS paths and check each directory
+ * explicitly; descriptor aliases are handled by fd_path above. */
+char *realpath(const char *restrict path, char *restrict resolved)
+{
+    char input[PATH_MAX], output[PATH_MAX] = "/";
+    struct stat st;
+    size_t used = 1;
+    char *part, *save;
+
+    if (!path) { errno = EINVAL; return NULL; }
+    if (!*path) { errno = ENOENT; return NULL; }
+    if (*path == '/')
+    {
+        if (strlen(path) >= sizeof(input)) { errno = ENAMETOOLONG; return NULL; }
+        strcpy(input, path);
+    }
+    else
+    {
+        if (!getcwd(input, sizeof(input))) return NULL;
+        if (strlen(input) + strlen(path) + 2 > sizeof(input)) { errno = ENAMETOOLONG; return NULL; }
+        strcat(input, "/"); strcat(input, path);
+    }
+    for (part = strtok_r(input, "/", &save); part; part = strtok_r(NULL, "/", &save))
+    {
+        if (stat(output, &st) < 0) return NULL;
+        if (!S_ISDIR(st.st_mode)) { errno = ENOTDIR; return NULL; }
+        if (!strcmp(part, ".")) continue;
+        if (!strcmp(part, ".."))
+        {
+            while (used > 1 && output[--used] != '/') ;
+            output[used] = 0;
+            continue;
+        }
+        if (used > 1) output[used++] = '/';
+        if (used + strlen(part) >= sizeof(output)) { errno = ENAMETOOLONG; return NULL; }
+        strcpy(output + used, part); used += strlen(part);
+    }
+    if (stat(output, &st) < 0) return NULL;
+    if (path[strlen(path) - 1] == '/' && !S_ISDIR(st.st_mode))
+    { errno = ENOTDIR; return NULL; }
+    if (!resolved && !(resolved = malloc(used + 1))) return NULL;
+    memcpy(resolved, output, used + 1);
+    return resolved;
+}
+
+/* fcntl() and ioctl() share one system call here; a device driver's ioctl
+ * commands 0, 1, 2 (ADC, I2C slave, ...) are F_DUPFD, F_GETFD, F_SETFD.
+ * Tagged, the kernel knows these are fcntl (DFS_FCNTL_TAG in the kernel's
+ * dfs.h: user-space ABI, so the two must ship together).
+ * F_GETOWN/F_SETOWN have no kernel ownership support; they currently fall
+ * through to the backend ioctl and must not be used for SIGIO ownership. */
+#define DFS_FCNTL_TAG 0x46430000
+
+int fcntl(int fd, int cmd, ...)
+{
+    unsigned long arg;
+    va_list ap;
+
+    arg = 0;
+    if (cmd != F_GETFD && cmd != F_GETFL && cmd != F_GETOWN)
+    {
+        va_start(ap, cmd);
+        arg = va_arg(ap, unsigned long);
+        va_end(ap);
+    }
+    if (cmd == F_SETFL)
+        arg |= O_LARGEFILE;     /* as musl's fcntl() */
+    return (int)k230_result(syscall(_NRSYS_ioctl, fd, DFS_FCNTL_TAG | cmd, arg));
+}
+
+/* musl's lseek() goes through _llseek, whose wrapper turns every error into
+ * EPERM. */
+off_t lseek(int fd, off_t offset, int whence)
+{
+    return (off_t)k230_result(syscall(_NRSYS_lseek, fd, offset, whence));
+}
+
+off_t lseek64(int fd, off_t offset, int whence) { return lseek(fd, offset, whence); }
+
+/* No positional I/O in the kernel: seek, transfer, seek back. Not atomic
+ * against other users of the same open file. ESPIPE on pipes and sockets. */
+static ssize_t positional_io(int fd, void *buf, size_t count, off_t offset, int write_it)
+{
+    off_t saved;
+    ssize_t n;
+    int err;
+
+    if (offset < 0)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    if (!write_it)
+    {
+        struct stat st;
+
+        /* Past the end reads nothing; seeking there first would grow a FAT
+         * file opened for writing. */
+        if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && offset >= st.st_size)
+            return 0;
+    }
+    saved = lseek(fd, 0, SEEK_CUR);
+    if (saved < 0 || lseek(fd, offset, SEEK_SET) < 0)
+        return -1;
+    n = write_it ? write(fd, buf, count) : read(fd, buf, count);
+    err = errno;
+    lseek(fd, saved, SEEK_SET);
+    errno = err;
+    return n;
+}
+
+ssize_t pread(int fd, void *buf, size_t count, off_t offset)
+{
+    return positional_io(fd, buf, count, offset, 0);
+}
+
+ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset)
+{
+    return positional_io(fd, (void *)buf, count, offset, 1);
+}
+
+ssize_t pread64(int fd, void *buf, size_t count, off_t offset) { return pread(fd, buf, count, offset); }
+ssize_t pwrite64(int fd, const void *buf, size_t count, off_t offset) { return pwrite(fd, buf, count, offset); }
+
+/* Stops at the first short transfer, as readv()/writev() must: musl's
+ * emulation read on into the next buffer (and could block there). */
+static ssize_t vector_io(int fd, const struct iovec *iov, int iovcnt, off_t offset, int write_it)
+{
+    ssize_t total = 0;
+    int i;
+
+    if (iovcnt < 0 || iovcnt > IOV_MAX)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    for (i = 0; i < iovcnt; i++)
+    {
+        ssize_t n;
+
+        if (iov[i].iov_len == 0)
+            continue;
+        if (offset >= 0)
+            n = positional_io(fd, iov[i].iov_base, iov[i].iov_len, offset + total, write_it);
+        else if (write_it)
+            n = write(fd, iov[i].iov_base, iov[i].iov_len);
+        else
+            n = read(fd, iov[i].iov_base, iov[i].iov_len);
+        if (n < 0)
+            return total ? total : -1;
+        total += n;
+        if ((size_t)n < iov[i].iov_len)
+            break;
+    }
+    return total;
+}
+
+ssize_t readv(int fd, const struct iovec *iov, int iovcnt) { return vector_io(fd, iov, iovcnt, -1, 0); }
+ssize_t writev(int fd, const struct iovec *iov, int iovcnt) { return vector_io(fd, iov, iovcnt, -1, 1); }
+
+ssize_t preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset)
+{
+    if (offset < 0)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    return vector_io(fd, iov, iovcnt, offset, 0);
+}
+
+ssize_t pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
+{
+    if (offset < 0)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    return vector_io(fd, iov, iovcnt, offset, 1);
+}
+
+ssize_t preadv64(int fd, const struct iovec *iov, int iovcnt, off_t offset) { return preadv(fd, iov, iovcnt, offset); }
+ssize_t pwritev64(int fd, const struct iovec *iov, int iovcnt, off_t offset) { return pwritev(fd, iov, iovcnt, offset); }
+
+/* Flags applied after the fact: not atomic against a concurrent fork(). */
+static int set_fd_flags(int fd, int flags)
+{
+    if ((flags & O_CLOEXEC) && fcntl(fd, F_SETFD, FD_CLOEXEC) < 0)
+        return -1;
+    if ((flags & O_NONBLOCK) && fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) < 0)
+        return -1;
+    return 0;
+}
+
+/* No native pipe2: pipe() publishes both fds before flags are set. A
+ * concurrent fork()/execve() can inherit them before FD_CLOEXEC is set. */
+int pipe2(int fds[2], int flags)
+{
+    int p[2];
+
+    if (flags & ~(O_CLOEXEC | O_NONBLOCK))
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    if (pipe(p) < 0)
+        return -1;
+    if (set_fd_flags(p[0], flags) < 0 || set_fd_flags(p[1], flags) < 0)
+    {
+        int err = errno;
+
+        close(p[0]);
+        close(p[1]);
+        errno = err;
+        return -1;
+    }
+    fds[0] = p[0];
+    fds[1] = p[1];
+    return 0;
+}
+
+/* No native dup3: dup2() publishes newfd before F_SETFD. A concurrent
+ * fork()/execve() can inherit it before FD_CLOEXEC is set. */
+int __dup3(int oldfd, int newfd, int flags)
+{
+    if (oldfd == newfd || (flags & ~O_CLOEXEC))
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    if (dup2(oldfd, newfd) < 0)
+        return -1;
+    if ((flags & O_CLOEXEC) && fcntl(newfd, F_SETFD, FD_CLOEXEC) < 0)
+        return -1;
+    return newfd;
+}
+
+int dup3(int oldfd, int newfd, int flags) { return __dup3(oldfd, newfd, flags); }
+
+int fdatasync(int fd)
+{
+    return fsync(fd);
+}
+
+int fallocate(int fd, int mode, off_t offset, off_t len)
+{
+    int err;
+
+    if (mode != 0)
+    {
+        errno = EOPNOTSUPP;
+        return -1;
+    }
+    err = posix_fallocate(fd, offset, len);
+    if (err)
+    {
+        errno = err;
+        return -1;
+    }
+    return 0;
+}
+
+int fallocate64(int fd, int mode, off_t offset, off_t len) { return fallocate(fd, mode, offset, len); }
+
+/* *at(): a path relative to @dirfd, through the directory's own path (the
+ * kernel has no *at calls). */
+static int at_path(int dirfd, const char *path, char *out, size_t size)
+{
+    size_t dlen, plen;
+    struct stat st;
+
+    if (!path)
+    {
+        errno = EFAULT;
+        return -1;
+    }
+    plen = strlen(path);
+    if (path[0] == '/' || dirfd == AT_FDCWD)
+    {
+        if (plen >= size)
+        {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        memcpy(out, path, plen + 1);
+        return 0;
+    }
+    if (plen == 0)
+    {
+        errno = ENOENT;
+        return -1;
+    }
+    if (fd_path(dirfd, out, size) < 0)
+        return -1;
+    if (stat(out, &st) < 0)
+        return -1;
+    if (!S_ISDIR(st.st_mode))
+    {
+        errno = ENOTDIR;
+        return -1;
+    }
+    dlen = strlen(out);
+    if (dlen + 1 + plen >= size)
+    {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    if (dlen == 0 || out[dlen - 1] != '/')
+        out[dlen++] = '/';
+    memcpy(out + dlen, path, plen + 1);
+    return 0;
+}
+
+int openat(int dirfd, const char *path, int flags, ...)
+{
+    char full[PATH_MAX];
+    mode_t mode = 0;
+
+    if (flags & (O_CREAT | O_TMPFILE))
+    {
+        va_list ap;
+
+        va_start(ap, flags);
+        mode = va_arg(ap, mode_t);
+        va_end(ap);
+    }
+    if (at_path(dirfd, path, full, sizeof(full)) < 0)
+        return -1;
+    return open(full, flags, mode);
+}
+
+int openat64(int dirfd, const char *path, int flags, ...)
+{
+    mode_t mode = 0;
+
+    if (flags & (O_CREAT | O_TMPFILE))
+    {
+        va_list ap;
+
+        va_start(ap, flags);
+        mode = va_arg(ap, mode_t);
+        va_end(ap);
+    }
+    return openat(dirfd, path, flags, mode);
+}
+
+int fstatat(int dirfd, const char *restrict path, struct stat *restrict st, int flag)
+{
+    char full[PATH_MAX];
+
+    if ((flag & AT_EMPTY_PATH) && path && path[0] == '\0')
+        return fstat(dirfd, st);
+    /* AT_SYMLINK_NOFOLLOW: no filesystem here has symbolic links. */
+    if (at_path(dirfd, path, full, sizeof(full)) < 0)
+        return -1;
+    return stat(full, st);
+}
+
+int fstatat64(int dirfd, const char *restrict path, struct stat *restrict st, int flag)
+{
+    return fstatat(dirfd, path, st, flag);
+}
+
+int faccessat(int dirfd, const char *path, int amode, int flag)
+{
+    char full[PATH_MAX];
+
+    (void)flag;
+    if (at_path(dirfd, path, full, sizeof(full)) < 0)
+        return -1;
+    return access(full, amode);
+}
+
+int mkdirat(int dirfd, const char *path, mode_t mode)
+{
+    char full[PATH_MAX];
+
+    if (at_path(dirfd, path, full, sizeof(full)) < 0)
+        return -1;
+    return mkdir(full, mode);
+}
+
+int unlinkat(int dirfd, const char *path, int flag)
+{
+    char full[PATH_MAX];
+
+    if (flag & ~AT_REMOVEDIR)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    if (at_path(dirfd, path, full, sizeof(full)) < 0)
+        return -1;
+    return (flag & AT_REMOVEDIR) ? rmdir(full) : unlink(full);
+}
+
+int renameat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath)
+{
+    char from[PATH_MAX], to[PATH_MAX];
+
+    if (at_path(olddirfd, oldpath, from, sizeof(from)) < 0 ||
+        at_path(newdirfd, newpath, to, sizeof(to)) < 0)
+        return -1;
+    return rename(from, to);
+}
+
+ssize_t readlinkat(int dirfd, const char *restrict path, char *restrict buf, size_t size)
+{
+    char full[PATH_MAX];
+
+    if (at_path(dirfd, path, full, sizeof(full)) < 0)
+        return -1;
+    return readlink(full, buf, size);
 }

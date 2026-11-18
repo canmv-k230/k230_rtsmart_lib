@@ -222,6 +222,12 @@ NRSYS(rt_hw_interrupt_enable)
 
 NRSYS(statfs)
 NRSYS(sched_yield)              /* 165 */
+NRSYS(getppid)
+NRSYS(getpgid)
+NRSYS(setpgid)
+NRSYS(getsid)
+NRSYS(ftruncate)                /* 170 */
+NRSYS(setitimer)
 
     _NRSYS_SYSCALL_NR
 };
